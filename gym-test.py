@@ -1,6 +1,7 @@
 import argparse
 
 import gym
+import batsim_py
 
 import gridgym.envs.off_reservation_env as e
 
@@ -43,9 +44,15 @@ def run(args):
                    t_shutdown=5,
                    hosts_per_server=12)
 
+    jobs_mon = batsim_py.monitors.JobMonitor(env.simulator)
+    sim_mon  = batsim_py.monitors.SimulationMonitor(env.simulator)
+
     hist = agent.play(env, True)
 
     print("[DONE]")
+
+    jobs_mon.to_csv("/data/expe-out/jobs.out")
+    sim_mon.to_csv("/data/expe-out/sim.out")
 
 
 def parse_args():

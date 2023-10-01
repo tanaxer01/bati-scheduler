@@ -24,20 +24,20 @@ cp -r "batsim-v${batversion}/platforms" platforms && \
 
 ### Preparing the simulation output directory
 ```bash
-    # Create the directory if needed
-    mkdir -p expe-out
+# Create the directory if needed
+mkdir -p expe-out
 
-    # Clean the directory's content if any
-    rm -rf expe-out/*
+# Clean the directory's content if any
+rm -rf expe-out/*
 ```
 ### Build simulation environment
 ```bash
-    git clone https://github.com/tanaxer01/bati-scheduler
-    cd bati-scheduler
-    docker image build -t batsim-py .
+git clone https://github.com/tanaxer01/bati-scheduler
+cd bati-scheduler
+docker image build -t batsim-py .
 ```
 
 ### Executing the simulation
 ```bash
-    docker container run --rm -v .:/data batsim-py python /data/run-sim.py
+docker container run --rm -v .:/data batsim-py python /data/run-sim.py
 ```
