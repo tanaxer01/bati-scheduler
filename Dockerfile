@@ -21,6 +21,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 RUN git clone https://github.com/tanaxer01/batsim-py && cd batsim-py && pip install .
 RUN git clone https://github.com/tanaxer01/GridGym   && cd GridGym   && pip install .
+RUN pip install evalys jupyter pandas matplotlib
 
 FROM python:3.10-slim
 

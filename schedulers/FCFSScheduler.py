@@ -18,7 +18,6 @@ class FCFSScheduler:
                 # Schedule if the job can start now.
                 allocation = [h.id for h in available[:job.res]]
                 self.simulator.allocate(job.id, allocation)
-                print(f"[+] ALOCATED JOB {job.name} in {allocation}")
             else:
                 # Otherwise, wait for resources.
                 break

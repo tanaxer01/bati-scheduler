@@ -151,8 +151,8 @@ class FileInterface:
             self.files["nodes"] = json.load(nodes_file)
 
         # Network file
-        with open("networks_types.json", "r") as networks_file:
-            self.files["networks"] = json.load(networks_file)
+        #with open("networks_types.json", "r") as networks_file:
+        #    self.files["networks"] = json.load(networks_file)
 
         assert sum([ int(i["type"] not in self.files["nodes"].keys()) for i in self.platform["nodes"] ]) == 0, "Node type not found in node type file"
 
@@ -171,6 +171,20 @@ class FileInterface:
         main_zone = self.gen_subelement(platform_xml, "zone", {"id": "main", "routing": "Full"})
 
         cluster_compute = self.gen_subelement(main_zone, "zone", {"id": "cluster_compute", "routing": "Full"})
+
+        counter = 0
+        for i in self.platform["nodes"]:
+            node_type = self.files["nodes"][ i["type"] ]
+            node_type["properties"].append({ "id": "type", "value":  i["type"] })
+
+            for _ in range( int(i["number"]) ):
+                node_type["attributes"]["id"] = fat_tree.nodes[0][counter].id
+
+                self.gen_subelement(cluster_compute, fat_tree.nodes[0][counter].type, node_type["attributes"], node_type["properties"])
+                counter += 1
+
+
+        '''
         # Compute nodes
         for i in self.platform["nodes"]:
             nodes_iter = iter(fat_tree.nodes[0])
@@ -180,6 +194,7 @@ class FileInterface:
                 node_type["attributes"]["id"] = curr.id
 
                 self.gen_subelement(cluster_compute, curr.type, node_type["attributes"], node_type["properties"])
+        '''
 
         # Routers
         for n in range(1, fat_tree.levels+1):
