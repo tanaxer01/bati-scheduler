@@ -7,8 +7,9 @@ import xml.etree.ElementTree as xml
 import json
 import networkx as nx
 import matplotlib.pyplot as plt
-import pydot
+import random
 from networkx.drawing.nx_pydot import graphviz_layout
+
 
 class Node:
     def __init__(self, id: str, node_type: str, up: Tuple[int, int] = (0, 0), dn: Tuple[int, int] = (0, 0)):
@@ -156,92 +157,116 @@ class FileInterface:
 
         assert sum([ int(i["type"] not in self.files["nodes"].keys()) for i in self.platform["nodes"] ]) == 0, "Node type not found in node type file"
 
-    def gen_subelement(self, zone, element_type: str, attrs: Dict[str, str], props: list[Dict[str, str]] = []):
+    def _generate_subelement(self, zone, element_type: str, attrs: Dict[str, str], props: list[Dict[str, str]] = []):
         sub_element = xml.SubElement(zone, element_type, attrib=OrderedDict(attrs) )
         for i in props:
             xml.SubElement(sub_element, "prop", attrib=OrderedDict({ "id": i["id"], "value": i["value"] }))
 
         return sub_element
 
+    def _generate_compute_node(self, zone, attrs: Dict[str,str], props: list[ Dict[str,str] ] = []):
+        prefixes = { 'G': 10e9, 'M': 10e6, "k": 10e3 }
+        rev_prefixes = { j: i for i, j in prefixes.items() }
+
+        def rm_prefix(x: str):
+            return float(x[:-1]) * prefixes[x[-1]] if x[-1] in prefixes.keys() else float(x)
+
+        '''
+        def add_prefix(x: float):
+            for i in rev_prefixes:
+                if x // i != 0:
+                    return f"{x//i}{rev_prefixes[i]}"
+            return f"{x}"
+        '''
+
+        # Mod speed
+        if "std" in attrs.keys():
+            std = rm_prefix( attrs.pop("std")[:-1] )
+
+            speeds = [ rm_prefix(i[:-1]) for i in attrs["speed"].replace(" ","").split(",") ]
+            speeds = [ random.uniform(i-std,i+std) for i in speeds ]
+
+            attrs["speed"] = ", ".join([ f"{i}f" for i in speeds ])
+
+        # Mod wattage_per_state
+        for i in props:
+            if i['id'] == "wattage_per_state" and "std" in i.keys():
+                std = float( i.pop("std") )
+
+                watts = [ [ random.uniform(round(float(k)-std, 3), round(float(k)+std, 3)) for k in j.split(":") ] for j in i['value'].replace(" ","").split(",") ]
+                watts = ", ".join([ ":".join([ str(k) for k in j ]) for j in watts ])
+
+                i['value'] = watts
+
+        self._generate_subelement(zone, "host", attrs, props)
 
     def write(self, fat_tree: FatTree):
         assert sum([ int(i["number"]) for i in self.platform["nodes"] ]) == fat_tree.nodes_by_level[0], "Number of nodes of the fat tree does not match the number specified in the platform file"
 
         platform_xml = xml.Element("platform", attrib=OrderedDict({"version": "4.1"}))
-        main_zone = self.gen_subelement(platform_xml, "zone", {"id": "main", "routing": "Full"})
+        main_zone = self._generate_subelement(platform_xml, "zone", {"id": "main", "routing": "Full"})
 
-        cluster_compute = self.gen_subelement(main_zone, "zone", {"id": "cluster_compute", "routing": "Full"})
+        cluster_compute = self._generate_subelement(main_zone, "zone", {"id": "cluster_compute", "routing": "Full"})
 
+        # Compute nodes
         counter = 0
         for i in self.platform["nodes"]:
             node_type = self.files["nodes"][ i["type"] ]
             node_type["properties"].append({ "id": "type", "value":  i["type"] })
 
-            for _ in range( int(i["number"]) ):
-                node_type["attributes"]["id"] = fat_tree.nodes[0][counter].id
+            for j in range( int(i["number"]) ):
+                node_type["attributes"]["id"] = fat_tree.nodes[0][j].id
 
-                self.gen_subelement(cluster_compute, fat_tree.nodes[0][counter].type, node_type["attributes"], node_type["properties"])
+                self._generate_compute_node(cluster_compute, node_type["attributes"], node_type["properties"])
+                #self._generate_subelement(cluster_compute, fat_tree.nodes[0][j].type, node_type["attributes"], node_type["properties"])
                 counter += 1
-
-
-        '''
-        # Compute nodes
-        for i in self.platform["nodes"]:
-            nodes_iter = iter(fat_tree.nodes[0])
-            for _ in range(int(i["number"])):
-                curr = next(nodes_iter)
-                node_type = self.files["nodes"][i["type"]]
-                node_type["attributes"]["id"] = curr.id
-
-                self.gen_subelement(cluster_compute, curr.type, node_type["attributes"], node_type["properties"])
-        '''
 
         # Routers
         for n in range(1, fat_tree.levels+1):
             for i in fat_tree.nodes[n]:
-                self.gen_subelement(cluster_compute, "router", {"id": i.id})
-        self.gen_subelement(cluster_compute, "router", {"id": "router_master"})
+                self._generate_subelement(cluster_compute, "router", {"id": i.id})
+        self._generate_subelement(cluster_compute, "router", {"id": "router_master"})
 
         # Links
         for i, j in fat_tree.routes.items():
             # Uplinks
             for k in range(j['up']):
-                self.gen_subelement(cluster_compute, "link", {"id": i+f"-uplink{k}", "bandwidth": "125MBps", "latency": "100us" })
+                self._generate_subelement(cluster_compute, "link", {"id": i+f"-uplink{k}", "bandwidth": "125MBps", "latency": "100us" })
 
             # Downlinks
             for k in range(j['dn']):
-                self.gen_subelement(cluster_compute, "link", {"id": i+f"-downlink{k}", "bandwidth": "125MBps", "latency": "100us" })
+                self._generate_subelement(cluster_compute, "link", {"id": i+f"-downlink{k}", "bandwidth": "125MBps", "latency": "100us" })
 
-            #self.gen_subelement(cluster_compute, "link", {"id": i, "bandwidth": "125MBps", "latency": "100us" })
+            #self._generate_subelement(cluster_compute, "link", {"id": i, "bandwidth": "125MBps", "latency": "100us" })
 
         for i in fat_tree.nodes[max(fat_tree.nodes.keys())]:
-            self.gen_subelement(cluster_compute, "link", {"id": f"router_master-{i.id}", "bandwidth": "125MBps", "latency": "100us" })
+            self._generate_subelement(cluster_compute, "link", {"id": f"router_master-{i.id}", "bandwidth": "125MBps", "latency": "100us" })
 
         # Routes
         for i, j in fat_tree.routes.items():
-            route = self.gen_subelement(cluster_compute, "route", {"src": j['src'], "dst": j['dst']})
+            route = self._generate_subelement(cluster_compute, "route", {"src": j['src'], "dst": j['dst']})
             # Uplinks
             for k in range(j['up']):
-                self.gen_subelement(route, "link_ctn", {"id": f"{j['src']}-{j['dst']}-uplink{k}"})
+                self._generate_subelement(route, "link_ctn", {"id": f"{j['src']}-{j['dst']}-uplink{k}"})
 
             # Downlinks
             for k in range(j['dn']):
-                self.gen_subelement(route, "link_ctn", {"id": f"{j['src']}-{j['dst']}-downlink{k}"})
+                self._generate_subelement(route, "link_ctn", {"id": f"{j['src']}-{j['dst']}-downlink{k}"})
 
         for i in fat_tree.nodes[max(fat_tree.nodes.keys())]:
-            route = self.gen_subelement(cluster_compute, "route", {"src": "router_master", "dst": i.id})
-            self.gen_subelement(route, "link_ctn", {"id": f"router_master-{i.id}"})
+            route = self._generate_subelement(cluster_compute, "route", {"src": "router_master", "dst": i.id})
+            self._generate_subelement(route, "link_ctn", {"id": f"router_master-{i.id}"})
 
         # MASTER ZONE
-        self.gen_subelement(main_zone, "cluster", {
+        self._generate_subelement(main_zone, "cluster", {
             "id": "cluster_master", "prefix": "master_host", "suffix": "", "radical": "0-0", "speed": "100.0Mf",
             "bw": "125MBps", "lat": "50us", "bb_bw": "2.25GBps", "bb_lat": "500us"
             }, [ { "id": "role", "value": "master" } ])
 
         # CLUSTERS LINK
-        self.gen_subelement(main_zone, "link", { "id": "backbone", "bandwidth": "1.25GBps", "latency": "500us" })
-        zoneRoute = self.gen_subelement(main_zone, "zoneRoute", { "src": "cluster_compute", "dst": "cluster_master", "gw_src": "router_master", "gw_dst": "master_hostcluster_master_router" })
-        self.gen_subelement(zoneRoute, "link_ctn", {"id": f"backbone"})
+        self._generate_subelement(main_zone, "link", { "id": "backbone", "bandwidth": "1.25GBps", "latency": "500us" })
+        zoneRoute = self._generate_subelement(main_zone, "zoneRoute", { "src": "cluster_compute", "dst": "cluster_master", "gw_src": "router_master", "gw_dst": "master_hostcluster_master_router" })
+        self._generate_subelement(zoneRoute, "link_ctn", {"id": f"backbone"})
 
         def doctype():
             return "<!DOCTYPE platform SYSTEM \"https://simgrid.org/simgrid.dtd\">"

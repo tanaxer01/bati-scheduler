@@ -7,9 +7,9 @@
             "1: p2  50 MFlops/s, [idle: 93W -> full burning: 170W]",
             "2: p3  20 MFlops/s, [idel: 90W -> full burning: 150W]"
         ],
-        "attributes": { "speed": "100.0Mf,50.0Mf,20.0Mf", "pstate": "0" },
+        "attributes": { "speed": "100.0Mf,50.0Mf,20.0Mf", "std": "1.0Mf", "pstate": "0" },
         "properties": [
-            { "id": "wattage_per_state", "value": "95.0:200.0,93.0:170.0,90.0:150.0" },
+            { "id": "wattage_per_state", "value": "95.0:200.0,93.0:170.0,90.0:150.0", "std": "5" },
             { "id": "wattage_off", "value": "2.0" }
         ]
     },

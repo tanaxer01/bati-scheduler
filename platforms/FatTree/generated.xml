@@ -4,35 +4,65 @@
 <platform version="4.1">
     <zone id="main" routing="Full">
         <zone id="cluster_compute" routing="Full">
-            <host speed="100.0Mf,50.0Mf,20.0Mf" pstate="0" id="c0">
+            <host speed="1002561063.8964944f, 508345470.88160825f, 196316940.2886433f" pstate="0" id="c0">
                 <prop id="wattage_per_state" value="95.0:200.0,93.0:170.0,90.0:150.0"/>
                 <prop id="wattage_off" value="2.0"/>
                 <prop id="type" value="node_A"/>
             </host>
-            <host speed="100.0Mf,50.0Mf,20.0Mf" pstate="0" id="c1">
+            <host speed="1002561063.8964944f, 508345470.88160825f, 196316940.2886433f" pstate="0" id="c1">
                 <prop id="wattage_per_state" value="95.0:200.0,93.0:170.0,90.0:150.0"/>
                 <prop id="wattage_off" value="2.0"/>
                 <prop id="type" value="node_A"/>
             </host>
-            <host speed="100.0Mf,50.0Mf,20.0Mf" pstate="0" id="c2">
+            <host speed="1002561063.8964944f, 508345470.88160825f, 196316940.2886433f" pstate="0" id="c2">
                 <prop id="wattage_per_state" value="95.0:200.0,93.0:170.0,90.0:150.0"/>
                 <prop id="wattage_off" value="2.0"/>
                 <prop id="type" value="node_A"/>
             </host>
-            <host speed="100.0Mf,50.0Mf,20.0Mf" pstate="0" id="c3">
+            <host speed="1002561063.8964944f, 508345470.88160825f, 196316940.2886433f" pstate="0" id="c3">
                 <prop id="wattage_per_state" value="95.0:200.0,93.0:170.0,90.0:150.0"/>
                 <prop id="wattage_off" value="2.0"/>
                 <prop id="type" value="node_A"/>
             </host>
-            <host speed="100.0Mf,50.0Mf,20.0Mf" pstate="0" id="c4">
+            <host speed="1002561063.8964944f, 508345470.88160825f, 196316940.2886433f" pstate="0" id="c4">
                 <prop id="wattage_per_state" value="95.0:200.0,93.0:170.0,90.0:150.0"/>
                 <prop id="wattage_off" value="2.0"/>
                 <prop id="type" value="node_A"/>
             </host>
-            <host speed="100.0Mf,50.0Mf,20.0Mf" pstate="0" id="c5">
+            <host speed="1002561063.8964944f, 508345470.88160825f, 196316940.2886433f" pstate="0" id="c5">
                 <prop id="wattage_per_state" value="95.0:200.0,93.0:170.0,90.0:150.0"/>
                 <prop id="wattage_off" value="2.0"/>
                 <prop id="type" value="node_A"/>
+            </host>
+            <host speed="10.0Gf, 0.05f" pstate="0" id="c0">
+                <prop id="wattage_per_state" value="10.0:100.0:7.0, 9.75:5:7.25"/>
+                <prop id="wattage_off" value="2.0"/>
+                <prop id="type" value="node_B"/>
+            </host>
+            <host speed="10.0Gf, 0.05f" pstate="0" id="c1">
+                <prop id="wattage_per_state" value="10.0:100.0:7.0, 9.75:5:7.25"/>
+                <prop id="wattage_off" value="2.0"/>
+                <prop id="type" value="node_B"/>
+            </host>
+            <host speed="10.0Gf, 0.05f" pstate="0" id="c2">
+                <prop id="wattage_per_state" value="10.0:100.0:7.0, 9.75:5:7.25"/>
+                <prop id="wattage_off" value="2.0"/>
+                <prop id="type" value="node_B"/>
+            </host>
+            <host speed="10.0Gf, 0.05f" pstate="0" id="c3">
+                <prop id="wattage_per_state" value="10.0:100.0:7.0, 9.75:5:7.25"/>
+                <prop id="wattage_off" value="2.0"/>
+                <prop id="type" value="node_B"/>
+            </host>
+            <host speed="10.0Gf, 0.05f" pstate="0" id="c4">
+                <prop id="wattage_per_state" value="10.0:100.0:7.0, 9.75:5:7.25"/>
+                <prop id="wattage_off" value="2.0"/>
+                <prop id="type" value="node_B"/>
+            </host>
+            <host speed="10.0Gf, 0.05f" pstate="0" id="c5">
+                <prop id="wattage_per_state" value="10.0:100.0:7.0, 9.75:5:7.25"/>
+                <prop id="wattage_off" value="2.0"/>
+                <prop id="type" value="node_B"/>
             </host>
             <host speed="10.0Gf, 0.05f" pstate="0" id="c6">
                 <prop id="wattage_per_state" value="10.0:100.0:7.0, 9.75:5:7.25"/>
@@ -50,36 +80,6 @@
                 <prop id="type" value="node_B"/>
             </host>
             <host speed="10.0Gf, 0.05f" pstate="0" id="c9">
-                <prop id="wattage_per_state" value="10.0:100.0:7.0, 9.75:5:7.25"/>
-                <prop id="wattage_off" value="2.0"/>
-                <prop id="type" value="node_B"/>
-            </host>
-            <host speed="10.0Gf, 0.05f" pstate="0" id="c10">
-                <prop id="wattage_per_state" value="10.0:100.0:7.0, 9.75:5:7.25"/>
-                <prop id="wattage_off" value="2.0"/>
-                <prop id="type" value="node_B"/>
-            </host>
-            <host speed="10.0Gf, 0.05f" pstate="0" id="c11">
-                <prop id="wattage_per_state" value="10.0:100.0:7.0, 9.75:5:7.25"/>
-                <prop id="wattage_off" value="2.0"/>
-                <prop id="type" value="node_B"/>
-            </host>
-            <host speed="10.0Gf, 0.05f" pstate="0" id="c12">
-                <prop id="wattage_per_state" value="10.0:100.0:7.0, 9.75:5:7.25"/>
-                <prop id="wattage_off" value="2.0"/>
-                <prop id="type" value="node_B"/>
-            </host>
-            <host speed="10.0Gf, 0.05f" pstate="0" id="c13">
-                <prop id="wattage_per_state" value="10.0:100.0:7.0, 9.75:5:7.25"/>
-                <prop id="wattage_off" value="2.0"/>
-                <prop id="type" value="node_B"/>
-            </host>
-            <host speed="10.0Gf, 0.05f" pstate="0" id="c14">
-                <prop id="wattage_per_state" value="10.0:100.0:7.0, 9.75:5:7.25"/>
-                <prop id="wattage_off" value="2.0"/>
-                <prop id="type" value="node_B"/>
-            </host>
-            <host speed="10.0Gf, 0.05f" pstate="0" id="c15">
                 <prop id="wattage_per_state" value="10.0:100.0:7.0, 9.75:5:7.25"/>
                 <prop id="wattage_off" value="2.0"/>
                 <prop id="type" value="node_B"/>
