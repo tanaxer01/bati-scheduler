@@ -3,6 +3,7 @@ import argparse
 import gym
 import batsim_py
 
+from schedulers.FCFSScheduler import FCFSScheduler
 import gridgym.envs.off_reservation_env as e
 
 
@@ -31,16 +32,16 @@ class FirstFitScheduler():
         return history
 
 
-def run(args):
+def run_gym():
     print("[RUNNING]")
 
     agent = FirstFitScheduler()
 
-    env = gym.make(args.env_id,
-                   platform_fn="/data/platforms/platform.xml",
+    env = gym.make("gridgym:Scheduling-v0",
+                   platform_fn="/data/platforms/energy_platform_mod.xml",
                    workloads_dir="/data/workloads/test",
-                   t_action=args.t_action,
-                   queue_max_len=args.queue_sz,
+                   t_action=1,
+                   queue_max_len=20,
                    t_shutdown=5,
                    hosts_per_server=12)
 
@@ -50,9 +51,7 @@ def run(args):
     hist = agent.play(env, True)
 
     print("[DONE]")
-
-    jobs_mon.to_csv("/data/expe-out/jobs.out")
-    sim_mon.to_csv("/data/expe-out/sim.out")
+    return jobs_mon, sim_mon, hist
 
 
 def parse_args():
@@ -65,4 +64,4 @@ def parse_args():
 
 
 if __name__ == "__main__":
-    run(parse_args())
+    run_gym()

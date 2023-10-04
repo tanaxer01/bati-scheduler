@@ -26,8 +26,7 @@ def run_simulation(scheduler, platform_path: str, workload_path: str):
 
 jobs_f, sim_f = run_simulation(FCFSScheduler,
                                "/data/platforms/FatTree/generated.xml",
-                               "/data/workloads/example_workload_hpc_seed4_jobs250.json")
-                               #"/data/workloads/test_batsim_paper_workload_seed1.json")
+                               "/data/workloads/test/w.json")
 
 jobs_f.to_csv(f"/data/expe-out/jobs-FCFS.out")
 sim_f.to_csv("/data/expe-out/sim-FCFS.out")

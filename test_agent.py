@@ -1,6 +1,8 @@
 import gym
 import test_env as e
 
+from random import random
+'''
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -15,6 +17,7 @@ class DQN(nn.Module):
         x = F.relu(self.layer1(x))
         x = F.relu(self.layer2(x))
         return self.layer3(x)
+'''
 
 class BatiScheduler():
     def act(self, obs):
