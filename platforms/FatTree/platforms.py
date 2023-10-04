@@ -10,7 +10,7 @@ class Platform:
     def draw(self) -> None:
         G = nx.DiGraph()
 
-        edges = [ (i.src, i.dst) for i in self.routes ]
+        edges = [ (i.src, i.dst) for i in self.routes if "router_master" not in i.id ]
         G.add_edges_from(edges)
 
         options = {

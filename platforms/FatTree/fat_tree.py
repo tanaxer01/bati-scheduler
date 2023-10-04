@@ -49,8 +49,9 @@ class FatTree(Platform):
         Generates all the routers needed by the architecture.
         """
         k = 2 * sum(nodes_by_level)
-
         for i in range(self.levels):
+            print(i)
+
             for j in range(nodes_by_level[i+1]):
                 curr = FatNode(f"r{i+1}{j}", NodeType.ROUTER, i+1)
                 k -= 1
@@ -82,6 +83,17 @@ class FatTree(Platform):
                     curr.downlinks =  self.link_count[ i.level-1 ]
                 self.routes.add(curr)
 
+    def _build_master_router(self) -> None:
+        router_master = FatNode(f"router_master", NodeType.ROUTER, self.levels+1)
+
+        self.nodes.append(router_master)
+        for i in self.nodes_in_level( self.levels ):
+            route = Route("router_master", i.id)
+            route.uplinks = 1
+            route.downlinks = 1
+
+            self.routes.add(route)
+    
     def build(self) -> None:
         self._build_hosts()
 
@@ -103,6 +115,7 @@ class FatTree(Platform):
 
         self._build_routers(nodes_by_level)
         self._build_links()
+        self._build_master_router()
 
 if __name__ == "__main__":
     A = FatTree(2,[4,4],[1,2],[1,2])

@@ -98,16 +98,30 @@ class PlatformSpecs:
             self._host_to_xml(cluster_zone, i)
 
         for i in filter(lambda x: x.level != 0, self.platform.nodes):
-            xml.SubElement(cluster_zone, "router", attrib=OrderedDict({"id": i.id}) )
+            print(i)
+        #    xml.SubElement(cluster_zone, "router", attrib=OrderedDict({"id": i.id}) )
+
+        xml.SubElement(cluster_zone, "router", attrib=OrderedDict({"id": "router_master"}) )
 
         # Links
         for i in self.platform.routes:
             i.attrs = { "bandwidth": "1.25GBps", "latency": "500us" }
             self._links_to_xml(cluster_zone, i)
 
+        ###
+        for i in filter(lambda x: x.level == self.platform.levels, self.platform.nodes):
+            xml.SubElement(cluster_zone, "link", attrib=OrderedDict({"id": f"router_master-{i.id}", "bandwidth": "1.25GBps", "latency": "500us" }) )
+        ###
+
         # Routes
         for i in self.platform.routes:
             self._route_to_xml(cluster_zone, i)
+
+        ###
+        for i in filter(lambda x: x.level == self.platform.levels, self.platform.nodes):
+            route = xml.SubElement(cluster_zone, "route", attrib=OrderedDict({"src": "router_master", "dst": i.id}))
+            xml.SubElement(route, "link_ctn", attrib=OrderedDict({"id": f"router_master-{i.id}"}))
+        ###
 
         # Master zone
         master_zone = xml.SubElement(main_zone, "cluster", attrib=OrderedDict({
