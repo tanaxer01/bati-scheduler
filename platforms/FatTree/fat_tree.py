@@ -1,7 +1,5 @@
 from itertools import cycle
 
-from networkx import watts_strogatz_graph
-
 from platforms import Route
 from platforms import Platform
 from platforms import Node, NodeType
@@ -50,8 +48,6 @@ class FatTree(Platform):
         """
         k = 2 * sum(nodes_by_level)
         for i in range(self.levels):
-            print(i)
-
             for j in range(nodes_by_level[i+1]):
                 curr = FatNode(f"r{i+1}{j}", NodeType.ROUTER, i+1)
                 k -= 1
@@ -93,7 +89,7 @@ class FatTree(Platform):
             route.downlinks = 1
 
             self.routes.add(route)
-    
+
     def build(self) -> None:
         self._build_hosts()
 

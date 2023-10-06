@@ -1,7 +1,7 @@
 {
     "nodes": [
-        { "type": "node_A", "number": 6 },
-        { "type": "node_B", "number": 10 }
+        { "type": "node_A", "number": 16 },
+        { "type": "node_B", "number": 0 }
     ],
     "cluster_network": "Network A",
     "dc_network": "Network A"

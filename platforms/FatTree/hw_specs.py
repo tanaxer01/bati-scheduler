@@ -11,8 +11,7 @@ from platforms import Node, NodeType
 
 
 class PlatformSpecs:
-    def __init__(self, plaform: Platform, input_json: str, output_xml: str = "generated.xml"):
-        self.platform   = plaform
+    def __init__(self, input_json: str, output_xml: str = "generated.xml"):
         self.output_xml = output_xml
 
         with open(input_json, "r") as platform_file:
@@ -22,10 +21,6 @@ class PlatformSpecs:
         # Node types
         with open("node_types.json", "r") as node_file:
             self.files["nodes"] = json.load(node_file)
-
-    def _assign_routes(self):
-        assert self.platform.levels == sum(self.platform_specs["links"]), f"Total number of links in platform input must be {self.platform.levels}"
-        pass
 
     def _host_to_xml(self, zone, node: Node):
         def rm_prefix(x: str):
@@ -81,15 +76,17 @@ class PlatformSpecs:
         for i in range(route.downlinks):
             xml.SubElement(route_el, "link_ctn", attrib=OrderedDict({"id": f"{route.id}-downlink{i}"}))
 
-    def assign(self):
+    def export(self, platform: Platform):
         platform_xml = xml.Element("platform", attrib=OrderedDict({"version": "4.1"}))
         main_zone = xml.SubElement(platform_xml, "zone", attrib=OrderedDict({"id": "main", "routing": "Full"}) )
 
         cluster_zone = xml.SubElement(main_zone, "zone", attrib=OrderedDict({"id": "cluster_compute", "routing": "Full"}) )
 
         # Hosts & Routers
-        host_types = sum([ [i["type"] for _ in range(i["number"])] for i in self.platform_specs["nodes"] ], []) 
-        for i, j in zip(sorted(self.platform.nodes_in_level(0), key=lambda x: x.node_type), host_types):
+        host_types = sum([ [i["type"] for _ in range(i["number"])] for i in self.platform_specs["nodes"] ], [])
+
+        assert len(host_types) == len(platform.nodes_in_level(0)), f"Only {len(host_types)} nodes where provided in the platform input file, {len(platform.nodes_in_level(0))} where expected."
+        for i, j in zip(sorted(platform.nodes_in_level(0), key=lambda x: x.node_type), host_types):
             i.props = self.files["nodes"][j]["properties"]
             i.attrs = self.files["nodes"][j]["attributes"]
 
@@ -97,16 +94,16 @@ class PlatformSpecs:
 
             self._host_to_xml(cluster_zone, i)
 
-        for i in filter(lambda x: x.level != 0, self.platform.nodes):
+        for i in filter(lambda x: x.level != 0, platform.nodes):
             xml.SubElement(cluster_zone, "router", attrib=OrderedDict({"id": i.id}) )
 
         # Links
-        for i in self.platform.routes:
+        for i in platform.routes:
             i.attrs = { "bandwidth": "1.25GBps", "latency": "500us" }
             self._links_to_xml(cluster_zone, i)
 
         # Routes
-        for i in self.platform.routes:
+        for i in platform.routes:
             self._route_to_xml(cluster_zone, i)
 
         # Master zone
