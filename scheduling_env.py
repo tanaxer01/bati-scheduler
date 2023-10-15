@@ -1,14 +1,19 @@
-from collections import defaultdict, deque
-from typing import Any, Dict, Optional, Tuple
+from collections import defaultdict
+from collections import deque
+from typing import Any
+from typing import Optional
+from typing import Tuple
+from typing import Dict
+
+from batsim_py import HostEvent
+from batsim_py import SimulatorEvent
+import batsim_py
+from batsim_py.resources import Host
+import gym
+from gym import spaces
+from gym import error
 import numpy as np
 
-import batsim_py
-from batsim_py.jobs import Job
-from batsim_py.resources import Host
-from batsim_py import HostEvent, SimulatorEvent
-
-import gym
-from gym import error, spaces
 from gridgym.envs.grid_env import GridEnv
 
 
@@ -52,7 +57,7 @@ class ShutdownPolicy():
                 self.simulator.set_callback(t, self.shutdown_idle_hosts)
 
 
-class TestEnv(GridEnv):
+class SchedulingEnv(GridEnv):
     def __init__(self,
                  platform_fn: str,
                  workloads_dir: str,
@@ -75,24 +80,21 @@ class TestEnv(GridEnv):
         super().__init__(platform_fn, workloads_dir, seed,
                          external_events_fn, simulation_time, True,
                          hosts_per_server=hosts_per_server)
-        self.simulator.subscribe( batsim_py.JobEvent.COMPLETED, self._on_job_completed)
+        self.simulator.subscribe(
+            batsim_py.JobEvent.COMPLETED, self._on_job_completed)
 
         self.shutdown_policy = ShutdownPolicy(t_shutdown, self.simulator)
+        self.running_jobs = list()
 
     def _on_job_completed(self, job: batsim_py.jobs.Job) -> None:
         if job.user_id is not None:
             self.user_conf[job.user_id].append(job.runtime / job.walltime)
 
-    def new_step(self, action: int) -> Tuple[Any, float, bool, dict]:
-        if self.simulator.is_running and self.simulator.platform:
-            raise error.ResetNeeded("Simulation not running.")
-
-        if self.queue_max_len < action < 0:
-            raise error.InvalidAction(f"Invalid action {action}.")
+        for i in [ i for i in self.running_jobs if j.id == job.id ]:
+            self.running_jobs.pop(i)
 
     def step(self, action: int) -> Tuple[Any, float, bool, dict]:
-        if self.simulator.is_running and self.simulator.platform:
-            raise error.ResetNeeded("Simulation not running.")
+        assert self.simulator.is_running and self.simulator.platform
 
         if self.queue_max_len < action < 0:
             raise error.InvalidAction(f'Invalid action {action}.')
@@ -118,22 +120,22 @@ class TestEnv(GridEnv):
     def _get_reward(self) -> float:
         nb_hosts = len(list(self.simulator.platform.hosts))
         # QoS
-        wait_t = sum(
-            1./j.walltime for j in self.simulator.queue[:self.queue_max_len])
+        wait_t = sum(1./j.walltime for j in self.simulator.queue[:self.queue_max_len]) / nb_hosts
 
         # Energy waste
-        energy_score = sum(
-            1. for h in self.simulator.platform.hosts if h.is_idle)
-        energy_score /= nb_hosts
+        #energy_score = sum(
+        #    1. for h in self.simulator.platform.hosts if h.is_idle)
+        #energy_score /= nb_hosts
 
         # Utilization
         u = sum(1. for h in self.simulator.platform.hosts if h.is_computing)
         u /= nb_hosts
 
         u_weight = 1 / max(1, self.shutdown_policy.timeout)
-        e_weight = -1
-        qos_weight = -1
-        return (e_weight * energy_score) + (u_weight * u) + (qos_weight * wait_t)
+        #e_weight = -1
+        #qos_weight = -1
+        return (u_weight * u) 
+        #return (e_weight * energy_score) + (u_weight * u) + (qos_weight * wait_t)
 
     def _get_state(self) -> Any:
         state: dict = {}
@@ -203,4 +205,3 @@ class TestEnv(GridEnv):
 
         act_space = spaces.Discrete(self.queue_max_len + 1)
         return obs_space, act_space
-

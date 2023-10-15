@@ -1,35 +1,39 @@
 import gym
+from batsim_py import monitors 
 import test_env as e
-
-from random import random
-'''
-import torch.nn as nn
-import torch.nn.functional as F
-
-class DQN(nn.Module):
-    def __init__(self, n_observations: int, n_actions: int) -> None:
-        super(DQN, self).__init__()
-        self.layer1 = nn.Linear(n_observations, 128)
-        self.layer2 = nn.Linear(128, 128)
-        self.layer3 = nn.Linear(128, n_actions)
-
-    def forward(self, x):
-        x = F.relu(self.layer1(x))
-        x = F.relu(self.layer2(x))
-        return self.layer3(x)
-'''
 
 class BatiScheduler():
     def act(self, obs):
         pass
 
     def play(self, env, verbose=True):
-        pass
+        history = { "score": 0, "steps": 0, "info": None }
+        obs, done, info, = env.reset(), False, {}
+
+        while not done:
+            obs, reward, done, info = env.step(self.act(obs))
+            history["score"] += reward
+            history["steps"] += 1
+            history["info"]   = info
+
+        if verbose:
+            print(f"[DONE] Score: {history['score']} - Steps: {history['steps']}")
+
+        env.close()
+        return history
 
 def run():
     agent = BatiScheduler()
     env   = gym.make()
 
+    jobs_mon = monitors.JobMonitor(env.simulator)
+    sim_mon  = monitors.SimulationMonitor(env.simulator)
+
     hist  = agent.play(env, True)
     print("[DONE]")
+
+    return jobs_mon, sim_mon
+
+if __name__ == "__main__":
+    run()
 

@@ -59,7 +59,7 @@ def run_gym():
     env = e.TestEnv(platform_fn = "/data/platforms/FatTree/generated.xml",
                     workloads_dir = "/data/workloads/test",
                     t_action = 1,
-                    queue_max_len = 10,
+                    queue_max_len = 20,
                     t_shutdown = 5,
                     hosts_per_server = 1)
 
