@@ -6,7 +6,6 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-from sklearn.decomposition import PCA
 
 BATCH_SIZE = 128
 GAMMA = 0.99
@@ -62,7 +61,7 @@ class DQNAgent:
             host_status /= platform["agenda"].shape[0]
 
             host_remaining_time = obs["current_time"] - (platform["agenda"][:,0] + platform["agenda"][:,1])
-            host_data  = np.concatenate([ host_status, host_remaining_time ]) 
+            host_data  = np.concatenate([ host_status, host_remaining_time ])
 
             all_data   = np.concatenate([queue_data, host_data])
             all_tensor = torch.tensor(all_data, device=self.device, dtype=torch.float)
@@ -80,7 +79,7 @@ class DQNAgent:
             #jobs = [i for i, j in enumerate(queue["jobs"]) if 0 < j[1] <= nb_available]
             #job_pos = -1 if len(jobs) == 0 else random.choice(jobs)
             job_pos = next((i for i, j in enumerate(queue["jobs"]) if 0 < j[1] <= nb_available), -1)
-            
+
             print(f"B{job_pos}")
             return job_pos + 1
 

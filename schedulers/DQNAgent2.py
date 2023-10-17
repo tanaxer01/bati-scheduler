@@ -1,4 +1,4 @@
-import random
+from typing import Tuple
 import numpy as np
 import torch
 
@@ -6,45 +6,88 @@ from collections import deque
 from itertools   import combinations
 
 from .dqn import Agent
-from .FreeSpaces import FreeSpaceContainer
+from .FreeSpaces import JobAgenda, FreeSpace
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class AgentWrapper:
     def __init__(self, state_size, action_size, seed):
-        self.seed = random.seed(seed)
+        self.seed  = np.random.seed(seed)
         self.agent = Agent(state_size, action_size, seed)
-        self.listFreeSpaces = FreeSpaceContainer(action_size, 20.0)
 
-    def act(self, obs, eps) -> int:
+    def act(self, obs, eps) -> Tuple[int, float]:
+        posible_spaces = obs["posible_spaces"]
+        current_job    = obs["current_job"]
+
+        if current_job["job"]["res"] == len(current_job["allocs"]):
+            return -1, -1
+
+        if np.random.uniform(0,1) > eps:
+            return  np.random.choice(posible_spaces)
+
+        max_score, best_act  = None, None
+        scores = self._predict_scores([ space for space, reserv in posible_spaces ])
+
+        for i, (action, space) in enumerate(posible_spaces):
+            score = scores[i]
+            if not max_score or score > max_score:
+                max_score = score
+                best_act = (action, space)
+
+        return best_act
+
+        curr_job = obs["current_job"]
         platform = obs["platform"]
         queue    = obs["queue"]
 
-        # 1. Check if queue is empty, in that case do nothing.
-        if queue["size"] == 0:
-            # TODO - check if shuffling the freeSpaceContainer could improve the schedule
-            return 0
+        # No current_job or Job filled
+        if queue["size"] == 0 or curr_job["job"].res == len(curr_job["job"].allocs):
+            # TODO: Check if len == res should be posible or not
+            return -1, -1
 
-        # 2. Calculate posible free spaces 
-        job = queue["jobs"][0]
-        posible_spaces = self.listFreeSpaces.get_posible_spaces(job.wall, job.res)
+        # TODO: Possible spaces should be sended by env
+        # Get possible free spaces
+        job = curr_job["job"]
+        if len(curr_job["job"].allocs) > 0:
+            # Job has at least 1 alloc
+            posible_spaces = self.listFreeSpaces.get_posible_spaces(job.wall, job.res, True)
+        else:
+            # Job without allocs
+            posible_spaces = self.listFreeSpaces.get_posible_spaces(job.wall, job.res, False)
 
-        # 3. Score each space 
+        space_scores   = self._score_spaces(posible_spaces)
+
+        # Epsilon -greedy action selection
+        if np.random.uniform(0,1) > eps:
+            choice_id = np.random.choice(len(posible_spaces), p=space_scores)
+            choice    = posible_spaces[choice_id]
+
+            # TODO: Update FutureAgenda
+            return len(choice.hosts), choice.start
+
+    def _predict_scores(self, spaces):
+        scores = np.array(spaces)
+        #[ self.agent.qnetwork_local(i) for i in spaces ]
+
+        return []
 
 
 
-        # Prep obs for self.agent.act
 
-        if queue["size"] == 0:
-            return 0
+        # TODO: Prep obs for self.agent.act
 
-        ## Queue Data
+        ## Queue stadistical data
+        ## Plaform Data
+        # Host utilization
+        # Host next free start
+        # Host consumption
+        ## Agenda  Data
+
         queue_len  = queue["size"]
         queue_wait = obs["current_time"] - queue["jobs"][:,0]
         queue_res  = queue["jobs"][:,1]
         queue_wall = queue["jobs"][:,2]
 
-        ## Plaform Data
         host_status = np.zeros(5)
         for i in platform["status"]:
             host_status[i-1] += 1
@@ -65,26 +108,31 @@ class AgentWrapper:
 
         with torch.no_grad():
             action_values = self.agent.qnetwork_local(obs)
-        self.agent.qnetwork_local.train()
-        valid_actions = np.array([ j if i < queue_len else -1 * float('inf') for i,j in enumerate(action_values.tolist()[0])])
+            self.agent.qnetwork_local.train()
+            valid_actions = np.array([ j if i < queue_len else -1 * float('inf') for i,j in enumerate(action_values.tolist()[0])])
 
-        # Epsilon -greedy action selection
-        if random.random() > eps:
-            return np.argmax(valid_actions) - 1
-            #return np.argmax(action_values.cpu().data.numpy())
-        else:
-            return random.choice(np.arange(queue_len)) - 1
-            #return random.choice(np.arange(self.action_size))
-        #return self.agent.act(all_data, eps) - 1
 
-    def _get_free_spaces(self):
-        pass
+        return np.argmax(valid_actions) - 1
 
     def _score_spaces(self, spaces):
-        pass
+        scores = np.zeros(len(spaces))
+
+        # wait_time
+        for i in range(len(spaces)):
+            scores[i] += spaces[i].start - self.listFreeSpaces.curr_time
+        # TODO: estimate_exec_time
+
+        # EnergyConsumption
+        #
+
+        exp_scores = np.exp(scores)
+        actions_prob = exp_scores / exp_scores.sum()
+
+        return actions_prob
+
 
     def train(self, env, n_episodes = 200, max_t = 1000, eps_start = 1.0, eps_end = 0.1, eps_decay = 0.996, verbose=True) -> None:
-        scores = [] # list containing score from each episode 
+        scores = [] # list containing score from each episode
         scores_window = deque(maxlen = 100) # last 100 scores
         eps = eps_start
 
@@ -99,11 +147,11 @@ class AgentWrapper:
                 ## above step decides whether we will train(learn) the network
                 ## actor (local_qnetwork) or we will fill the replay buffer
                 ## if len replay buffer is equal to the batch size then we will
-                ## train the network or otherwise we will add experience tuple in our 
+                ## train the network or otherwise we will add experience tuple in our
                 ## replay buffer.
                 state = next_state
                 score += reward
-                if done: 
+                if done:
                     break
 
                 scores_window.append(score)
@@ -125,7 +173,7 @@ class AgentWrapper:
         if load_data:
             self.agent.qnetwork_local.load_state_dict(torch.load('checkpoint.pth'))
 
-        eps = 1.0 
+        eps = 1.0
         eps_end = 0.1
         eps_decay = 0.996
 
@@ -148,124 +196,4 @@ class AgentWrapper:
 
         if verbose:
             print(f"[DONE] Score: {history['score']} - Steps: {history['steps']}")
-
-'''
-def action_to_num(machines: list[int], action: list[int]) -> int:
-    all_actions = sum([ list(combinations(machines, i))  for i in range(1, len(machines)+1) ], [])
-    action_dict = { j: i for i, j in enumerate([()] + all_actions) }
-
-    if action in all_actions:
-        return action_dict[action]
-    return -1
-
-class DQNAgent(object):
-    def __init__(self):
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.steps_done = 0
-        self.listFreeSpace : Optional[FreeSpaceContainer] = None
-
-    def act(self, obs) -> int:
-        queue = obs['queue']
-        platform = obs['platform']
-        nb_available = len(platform["agenda"]) - sum(1 for j in platform["agenda"] if j[1] != 0)
-
-        # Add fst job to listFreeSpace
-        if queue["size"] == 0:
-            return 0
-
-        job = queue["jobs"][0]
-        posible_actions = self.listFreeSpace.get_spaces(job[3], job[2])
-        #posible_actions = [ action_to_num(obs["platform"]["ids"], i) for i in posible_actions ]
-
-        # 
-        if len(posible_actions) == 0:
-            pass 
-
-        self.steps_done += 1
-        sample = random.random()
-        eps_threshold = EPS_END + (EPS_START - EPS_END) * math.exp(-1. * self.steps_done / EPS_DECAY)
-        if sample > eps_threshold:
-            # EXPLOTATION
-
-            ## Reservations
-            utilization = np.full(nb_available, 1)
-            for i in self.listFreeSpace.agenda:
-                utilization[i-1] 
-
-            ## Queue Data
-            queue_len  = queue["size"]
-            queue_wait = obs["current_time"] - queue["jobs"][:,0]
-            queue_res  = queue["jobs"][:,1]
-            queue_wall = queue["jobs"][:,2]
-            queue_data = np.concatenate([ [queue_len],queue_wait,queue_res,queue_wall ])
-
-            ## Platform Data
-            host_status = np.zeros(5)
-            for i in platform["status"]:
-                host_status[i-1] += 1
-            host_status /= platform["agenda"].shape[0]
-            host_remaining_time = obs["current_time"] - (platform["agenda"][:,0] + platform["agenda"][:,1])
-            host_data  = np.concatenate([ host_status, host_remaining_time ]) 
-
-            all_data   = np.concatenate([queue_data, host_data])
-            all_tensor = torch.tensor(all_data, device=self.device, dtype=torch.float)
-
-            with torch.no_grad():
-                # Build Q-Net input
-                # - Util. x Host en el FreeSpace
-                # - Cant Espacios
-                # -  
-
-                future_reservations = np.array(sum([[ i.host, i.start, i.end ] for i in self.listFreeSpace.agenda], []))
-                #queue_data    = np.concatenate([obs["queue"]["jobs"].ravel(), [obs["queue"]["size"]]])
-                #platform_data = np.concatenate([obs["platform"]["status"].ravel(),obs["platform"]["agenda"].ravel()])
-                #state_data = np.concatenate([queue_data, platform_data])
-                #size = obs["queue"]["size"]
-                state_data = np.concatenate()
-
-                obs_arr = torch.tensor(state_data, device=self.device, dtype=torch.float)
-                results = self.policy_net(obs_arr).tolist()
-                masked_results = [ i if j in posible_actions else -1*float('inf') for i, j in enumerate(results) ]
-
-                return masked_results.index(max(masked_results))
-        else:
-            # EXPLORATION
-            # return random.choice(posible_actions)
-            pass
-
-    def play(self, env, verbose=True) -> None:
-        history = { 'score': 0, 'steps': 0, 'info': None }
-        obs, done, info = env.reset(), False, {}
-
-        nb_core = len(obs["platform"]["status"])
-        # queue
-        queue_s = obs["queue"]["jobs"].ravel().shape[0] + 1
-        print(obs["queue"].keys(), queue_s)
-
-        platform_s = obs["platform"]["status"].ravel().shape[0] + obs["platform"]["agenda"].ravel().shape[0]
-        print(obs["platform"].keys(), platform_s)
-
-        state_s = queue_s + platform_s + 1
-        obs_s   = 2**nb_core
-        print(">>", obs_s)
-        print(">>", state_s, env.action_space.n)
-
-        self.listFreeSpace = FreeSpaceContainer(nb_core, 20.)
-
-        self.policy_net = DQN(state_s, obs_s).to(self.device)
-        #self.target_net = DQN(state_s, env.action_space.n).to(self.device)
-        #self.target_net.load_state_dict(self.policy_net.state_dict())
-
-        while not done:
-            obs, reward, done, info = env.step(self.act(obs))
-            history['score'] += reward
-            history['steps'] += 1
-            history['info'] = info
-
-            if history["score"] < -3000:
-                print(f"[ERROR] Simulation stopped.")
-
-        if verbose:
-            print(f"[DONE] Score: {history['score']} - Steps: {history['steps']}")
-'''
 

@@ -1,0 +1,9 @@
+git+https://github.com/tanaxer01/batsim-py
+git+https://github.com/tanaxer01/GridGym
+jupyter
+torch
+evalys
+matplotlib
+seaborn
+numpy
+networkx
