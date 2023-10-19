@@ -1,75 +1,112 @@
-from typing import Iterable, List, Set
+from typing import Iterable, Iterator, List, Set  
 from itertools import combinations
 import random
-import numpy as np
 
-class FutureReservation:
-    def __init__(self, host: int, job: int, start: float, end: float) -> None:
-        self.host = host
-        self.job  = job
+class TimeBlock:
+    def __init__(self, start: int, end: int) -> None:
         self.start, self.end = start, end
 
     def __repr__(self) -> str:
-        return f"<< FutureReservation [h{self.host}] {self.start} - {self.end} >>"
+        return f"{self.start} -> {self.end}"
 
-class FreeSpace:
-    def __init__(self, hosts: Set[int], start: float, end: float) -> None:
-        assert len(hosts) != 0
-
+class FutureReservation(TimeBlock):
+    def __init__(self, hosts: Set[int], job_id: str, start: int, end: int) -> None:
+        super().__init__(start, end)
         self.hosts = hosts
-        self.start, self.end = start, end
+        self.job   = job_id
+        self.full  = False
+        self.started = False
+
+    def __repr__(self) -> str:
+        return f"<< FutureReservation [{[ 'h'+str(i) for i in self.hosts ]}] {'j'+str(self.job)} {self.start} -> {self.end} >>"
+
+    def add_host(self, host_id) -> None:
+        assert host_id not in self.hosts
+        self.hosts.add(host_id)
+
+class FreeSpace(TimeBlock):
+    def __init__(self, hosts: Set[int], start: int, end: int) -> None:
+        super().__init__(start, end)
+
+        assert len(hosts) != 0
+        self.hosts = hosts
 
     def __repr__(self) -> str:
         return f"<< FreeSpace [h{self.hosts}] {self.start} - {self.end} >>"
 
 
 class JobAgenda:
-    def __init__(self, total_resources: int, max_range: float, min_step: float):
+    def __init__(self, total_resources: int, max_range: int, min_step: int):
         self.total_resources = total_resources
         self.max_range  = max_range
         self.min_step   = min_step
-        self.curr_time  = 0.
+        self.curr_time  = 0
 
         self.items : List[FutureReservation] = []
 
     @property
-    def max_time(self) -> float:
+    def max_time(self) -> int:
         return self.curr_time + self.max_range
+
+    @property
+    def jobs(self) -> Iterator[str]:
+        return ( i.job for i in self.items )
+
+    @property
+    def running_jobs(self) -> Iterator[str]:
+        return ( i.job for i in self.items if i.started )
+
+    def generator(self) -> Iterator[FutureReservation]:
+        return ( i for i in self.items )
 
     def _check_range(self, start: float, end: float) -> Iterable[FutureReservation]:
         return filter(lambda x: start <= x.start < end or start < x.end <= end, self.items)
 
-    def add_reservation(self, hosts_ids: list[int], job_id: int, start: float, end: float) -> None:
+    def add_reservation(self, hosts: Set[int], job_id: str, start: int, end: int) -> None:
         assert start <= self.max_time, "Reservation starts after max time."
-        for host_id in hosts_ids:
-            assert host_id not in [ i.host for i in self._check_range(start, end) ], "Host already allocated in that time range."
-            self.items.append( FutureReservation(host_id, job_id, start, end) )
+        assert sum([ len(hosts & i.hosts) for i in self._check_range(start, end) ]) == 0, "A host is already allocated in this time range." 
+        self.items.append(FutureReservation(hosts, job_id, start, end))
 
-    def update(self, current_time):
+    def update_reservation(self, host_id: int, job_id: int, start, end) -> None:
+        reservations = list(filter(lambda x: x.job == job_id, self._check_range(start, end)))
+        assert len(reservations) == 1, "Job cant be reserved more than one time in this time period."
+
+        reservations[0].add_host(host_id)
+
+    def start_job(self, job_id: str) -> None:
+        for i in self.generator():
+            if i.start == self.curr_time and i.job == job_id and not i.started:
+                i.started = True
+                return
+
+        raise Exception("job running or not found")
+
+    def update_time(self, current_time: int):
         self.curr_time = current_time
-        self.items = list(filter(lambda x: x.end > current_time, self.items))
+        self.items = list(filter(lambda x: x.end >= current_time, self.items))
 
         for i in self.items:
+            if i.start < self.curr_time:
+                assert i.started, f"If job start is {i.start} it should had already started at this point (curr_time = {self.curr_time})"
             i.start = max(current_time, i.start)
 
-    def get_posible_spaces(self, estimated_duration: float, needed_cores: int, combs: bool) -> List[FreeSpace]:
-        """
-        """
+    def get_posible_spaces(self, estimated_duration: int, needed_cores: int) -> List[FreeSpace]:
         free_spaces = []
 
-        for i in np.arange(self.curr_time, self.max_time+1., self.min_step):
+        for i in range(self.curr_time, self.max_time + 1, self.min_step):
             start, end = i, i + estimated_duration
-            used_cores = [ i.host for i in self._check_range(start, end) ]
+            used_cores = set().union(*[ i.hosts for i in self._check_range(start, end) ])
 
             if self.total_resources - len(used_cores) >= needed_cores:
                 free_cores = { i for i in range(self.total_resources) if i not in used_cores }
 
-                if combs:
-                    if len(free_cores) > needed_cores:
-                        for cores in combinations(free_cores, needed_cores):
-                            free_spaces.append(FreeSpace(set(cores), start, end))
-                    else:
-                        free_spaces.append(FreeSpace(free_cores, start, end))
+                # TODO check if still necesary
+                #if len(free_cores) > needed_cores:
+                #    for cores in combinations(free_cores, needed_cores):
+                #        free_spaces.append(FreeSpace(set(cores), start, end))
+                #else:
+                #    free_spaces.append(FreeSpace(free_cores, start, end))
+                free_spaces.append(FreeSpace(free_cores, start, end))
 
         return free_spaces
 
@@ -78,8 +115,9 @@ class JobAgenda:
 
         zero = self.curr_time
         for i in self.items:
-            for j in range(int(i.start - zero), int(i.end - zero + 1)):
-                hosts[i.host-1][j] = i.host
+            for k in range(int(i.start - zero), int(i.end - zero + 1)):
+                for j in i.hosts:
+                    hosts[j-1][k] = j
 
         for i in hosts:
             print(i)
@@ -94,22 +132,18 @@ if __name__ == "__main__":
         (2, 10., 11.)
     ]
 
-
-    listFreeSpaces = JobAgenda(5, 1, 15)
+    listFreeSpaces = JobAgenda(5, 20, 1)
 
     for i, j, k in agenda:
-        listFreeSpaces.add_reservation([i], 0, j, k)
-    listFreeSpaces.add_reservation([4,5], 0, 6., 8.)
+        listFreeSpaces.add_reservation({i}, "0", j, k)
+    listFreeSpaces.add_reservation({4,5}, "0", 6, 8)
 
     listFreeSpaces.print_agenda()
     print("===")
-    spaces = listFreeSpaces.get_posible_spaces(4., 2, False)
+    spaces = listFreeSpaces.get_posible_spaces(4, 2)
     print(len(spaces))
     for i in spaces[:3]:
         print(i)
-    print("===")
-    listFreeSpaces.update(4.)
-    listFreeSpaces.print_agenda()
     print("===")
     print(random.choice(spaces))
 

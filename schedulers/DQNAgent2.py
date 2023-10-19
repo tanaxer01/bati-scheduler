@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import Optional, Tuple
 import numpy as np
 import torch
 
@@ -15,65 +15,43 @@ class AgentWrapper:
         self.seed  = np.random.seed(seed)
         self.agent = Agent(state_size, action_size, seed)
 
-    def act(self, obs, eps) -> Tuple[int, float]:
+    def act(self, obs, eps):
         posible_spaces = obs["posible_spaces"]
         current_job    = obs["current_job"]
 
-        if current_job["job"]["res"] == len(current_job["allocs"]):
+        ### Invalid actions
+        if (current_job[1] != 0 and current_job[1] == current_job[2]) or len(posible_spaces) == 0:
+            print(f"act: {'Ready' if len(posible_spaces) != 0 else 'No spaces' }")
             return -1, -1
 
+        ### Exploration v Explotation
         if np.random.uniform(0,1) > eps:
-            return  np.random.choice(posible_spaces)
+            choice = np.random.choice(posible_spaces.shape[0])
+            print("act: exploration", posible_spaces[choice,0:2])
+            return posible_spaces[choice,0:2] 
 
         max_score, best_act  = None, None
-        scores = self._predict_scores([ space for space, reserv in posible_spaces ])
-
-        for i, (action, space) in enumerate(posible_spaces):
+        scores = self._predict_scores(posible_spaces, current_job)
+        for i, (core, space, *_) in enumerate(posible_spaces):
             score = scores[i]
             if not max_score or score > max_score:
                 max_score = score
-                best_act = (action, space)
+                best_act = (core, space)
 
+        print("act: explotation", best_act)
         return best_act
 
-        curr_job = obs["current_job"]
-        platform = obs["platform"]
-        queue    = obs["queue"]
+    def _predict_scores(self, spaces, curr_job):
+        inputs  = np.hstack((spaces, np.tile(curr_job, (spaces.shape[0], 1))))
+        outputs = np.zeros(len(inputs))
 
-        # No current_job or Job filled
-        if queue["size"] == 0 or curr_job["job"].res == len(curr_job["job"].allocs):
-            # TODO: Check if len == res should be posible or not
-            return -1, -1
+        for i, j in enumerate(inputs):
+            with torch.no_grad():
+                obs  = torch.from_numpy(j).float().unsqueeze(0).to(device)
+                pred = self.agent.qnetwork_local(obs)
+                outputs[i] = np.argmax(pred)
 
-        # TODO: Possible spaces should be sended by env
-        # Get possible free spaces
-        job = curr_job["job"]
-        if len(curr_job["job"].allocs) > 0:
-            # Job has at least 1 alloc
-            posible_spaces = self.listFreeSpaces.get_posible_spaces(job.wall, job.res, True)
-        else:
-            # Job without allocs
-            posible_spaces = self.listFreeSpaces.get_posible_spaces(job.wall, job.res, False)
-
-        space_scores   = self._score_spaces(posible_spaces)
-
-        # Epsilon -greedy action selection
-        if np.random.uniform(0,1) > eps:
-            choice_id = np.random.choice(len(posible_spaces), p=space_scores)
-            choice    = posible_spaces[choice_id]
-
-            # TODO: Update FutureAgenda
-            return len(choice.hosts), choice.start
-
-    def _predict_scores(self, spaces):
-        scores = np.array(spaces)
-        #[ self.agent.qnetwork_local(i) for i in spaces ]
-
-        return []
-
-
-
-
+        return outputs
         # TODO: Prep obs for self.agent.act
 
         ## Queue stadistical data
@@ -114,6 +92,7 @@ class AgentWrapper:
 
         return np.argmax(valid_actions) - 1
 
+    '''
     def _score_spaces(self, spaces):
         scores = np.zeros(len(spaces))
 
@@ -129,8 +108,10 @@ class AgentWrapper:
         actions_prob = exp_scores / exp_scores.sum()
 
         return actions_prob
+    '''
 
 
+    # TODO FIX TRAIN ALGO
     def train(self, env, n_episodes = 200, max_t = 1000, eps_start = 1.0, eps_end = 0.1, eps_decay = 0.996, verbose=True) -> None:
         scores = [] # list containing score from each episode
         scores_window = deque(maxlen = 100) # last 100 scores
@@ -140,7 +121,7 @@ class AgentWrapper:
             state = env.reset()
             score = 0
 
-            for t in range(max_t):
+            for t in range(max_t): 
                 action = self.act(state, eps)
                 next_state, reward, done, _ = env.step(action)
 
@@ -169,7 +150,7 @@ class AgentWrapper:
                     break
         return scores
 
-    def play(self, env, load_data=True, verbose=True) -> None:
+    def play(self, env, load_data=False, verbose=True) -> None:
         if load_data:
             self.agent.qnetwork_local.load_state_dict(torch.load('checkpoint.pth'))
 
@@ -177,17 +158,18 @@ class AgentWrapper:
         eps_end = 0.1
         eps_decay = 0.996
 
-
         history = { 'score': 0, 'steps': 0, 'info': None }
         obs, done, info = env.reset(), False, {}
 
         while not done:
+            print("STEP", history["steps"])
             obs, reward, done, info = env.step(self.act(obs, eps))
             history['score'] += reward
             history['steps'] += 1
             history['info'] = info
-            print(history["steps"], history["score"], eps)
 
+            #if history["steps"] == 5:
+            #    break
             if history["score"] < -100:
                 break
 
