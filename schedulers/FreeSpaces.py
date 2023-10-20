@@ -1,4 +1,4 @@
-from typing import Iterable, Iterator, List, Set  
+from typing import Iterable, Iterator, List, Set
 from itertools import combinations
 import random
 
@@ -60,12 +60,20 @@ class JobAgenda:
         return ( i for i in self.items )
 
     def _check_range(self, start: float, end: float) -> Iterable[FutureReservation]:
-        return filter(lambda x: start <= x.start < end or start < x.end <= end, self.items)
+        smaller = filter(lambda x:   start <= x.start <=   end or   start <= x.end <=   end, self.items)
+        bigger  = filter(lambda x: x.start <=   start <= x.end or x.start <=   end <= x.end, self.items)
+
+        items = set(smaller).union(set(bigger))
+
+        return items
 
     def add_reservation(self, hosts: Set[int], job_id: str, start: int, end: int) -> None:
         assert start <= self.max_time, "Reservation starts after max time."
-        assert sum([ len(hosts & i.hosts) for i in self._check_range(start, end) ]) == 0, "A host is already allocated in this time range." 
-        self.items.append(FutureReservation(hosts, job_id, start, end))
+        assert sum([ len(hosts & i.hosts) for i in self._check_range(start, end) ]) == 0, "A host is already allocated in this time range."
+
+        item = FutureReservation(hosts, job_id, start, end)
+        item.full = True
+        self.items.append(item)
 
     def update_reservation(self, host_id: int, job_id: int, start, end) -> None:
         reservations = list(filter(lambda x: x.job == job_id, self._check_range(start, end)))
@@ -145,5 +153,5 @@ if __name__ == "__main__":
     for i in spaces[:3]:
         print(i)
     print("===")
-    print(random.choice(spaces))
+    listFreeSpaces.add_reservation({1,2}, "4",3, 2)
 

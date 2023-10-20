@@ -9,7 +9,7 @@ from batsim_py.events import SimulatorEvent
 from gridgym.envs.grid_env import GridEnv
 from gym import error, spaces
 
-from schedulers.FreeSpaces import JobAgenda
+from schedulers.FreeSpaces import FreeSpace, JobAgenda
 
 class PerCoreEnv(GridEnv):
     def __init__(self, platform_fn: str,
@@ -64,28 +64,25 @@ class PerCoreEnv(GridEnv):
     def step(self, action: Tuple[int, float]) -> Tuple[Any, float, bool, dict]:
         if not self.simulator.is_running or not self.simulator.platform:
             raise error.ResetNeeded("Simulation not running.")
-
+        '''
         print("step: time", self.simulator.current_time)
-        for i in self.freeSpaceList.items:
-            print(i, i.full, i.started)
 
-        self._test_schedule()
-
-        # 1. No jobs arrived
-        if len(self.simulator.queue) == 0 or (self._get_next_job() == None and self.current_job == None):
+        # 1. No jobs on queue
+        if len(self.simulator.queue) == 0:
+        # if len(self.simulator.queue) == 0 or (self._get_next_job() == None and self.current_job == None):
             self.simulator.proceed_time(self.t_action)
             self.freeSpaceList.update_time(self.simulator.current_time)
-
 
             obs  = self._get_state()
             done = not self.simulator.is_running
             info = { "workload": self.workload }
             return obs, 0., done, info
 
-        # 2. Asign current_job
+        # 2. No current_job assigned
         if self.current_job == None:
-            self.current_job = self._get_next_job() 
+            self.current_job = self._get_next_job()
 
+            # TODO - What happends if next_job is None
             print(f"step: new current job {self.current_job}", action)
 
             obs  = self._get_state()
@@ -101,7 +98,7 @@ class PerCoreEnv(GridEnv):
             print("A", allocs, len(allocs), self.current_job.res)
             assert len(allocs) == self.current_job.res
 
-            # TODO: Handle wall == 0 
+            # TODO: Handle wall == 0
             assert self.current_job.walltime != None and self.current_job.walltime != -1
 
             start = self.current_alloc[0][1]
@@ -116,18 +113,22 @@ class PerCoreEnv(GridEnv):
             self.current_alloc = []
             scheduled = True
         else:
-            assert tuple(action) not in self.current_alloc, f"found {action}"  
+            assert tuple(action) not in self.current_alloc, f"found {action}"
             action = (action[0], action[1] + self.freeSpaceList.curr_time)
 
             self.current_alloc.append(action)
             if len(self.current_alloc) == 1:
                 duration = 1000 if self.current_job.walltime is None else self.current_job.walltime
-                self.freeSpaceList.add_reservation({int(action[0])}, self.current_job.id, action[1], action[1] + duration)
+                self.freeSpaceList.add_reservation({int(action[0])}, self.current_job.id, int(action[1]), int(action[1] + duration))
                 print("ADD", self.freeSpaceList.items)
             else:
                 duration = 1000 if self.current_job.walltime is None else self.current_job.walltime
                 self.freeSpaceList.update_reservation(int(action[0]), self.current_job.id, action[1], action[1] + duration)
                 print("UPDT", self.freeSpaceList.items)
+
+            print("--->", self.freeSpaceList.items)
+            print("--->", self.current_alloc)
+
 
             if len(self.current_alloc) == self.current_job.res:
                 for i in self.freeSpaceList.generator():
@@ -137,24 +138,96 @@ class PerCoreEnv(GridEnv):
 
         print(self.simulator.current_time, "...", action, self.current_job, self.current_alloc)
         # TODO: Test Scheduling job
-        #if scheduled: 
+        #if scheduled:
         #    self._schedule_jobs()
+        self._test_schedule()
+        '''
+
+        print(self.simulator.current_time, "step:", action)
+
+        if self.current_job == None: # No hay trabajo seleccionado
+            print("BBB")
+            self.current_job = self._get_next_job()
+            if self.current_job:
+                print(self.simulator.current_time, "step: current job ==", self.current_job, self.current_job.res)
+
+        if len(self.simulator.queue) == 0 or self.current_job == None: # No hay trabajos que agendar
+            print("BBBB")
+            self._test_schedule()
+            self._time_step()
+            print(self.simulator.current_time, "step: queue len == 0")
+
+            return self._get_state(), 0., False, {}
+
+        assert self.current_job != None, "Ver que pasa si _get_next_job retorna null"
+
+        duration = int(1000 if self.current_job.walltime is None else self.current_job.walltime)
+        if len(self.freeSpaceList.get_posible_spaces(self.current_job.res, duration)) == 0:
+            self._test_schedule()
+            self._time_step()
+
+            return self._get_state(), 0., False, {}
+
+        print("AAAA", self.current_job, self.current_job.res, self.current_alloc, len(self.simulator.queue))
+        print("AAAA", self.freeSpaceList.get_posible_spaces(self.current_job.res, duration))
+
+        reward = 0
+        if action == (-1, -1) and self.current_job.res == len(self.current_alloc):
+            # Trabajo esta listo
+            print(self.simulator.current_time, "step: all allocs should be reserved")
+
+            allocs = {i[0] for i in self.current_alloc}
+            print(self.current_alloc, self.current_job.res, self.current_job.id)
+            assert len(allocs) == self.current_job.res
+
+            # TODO: Handle wall == 0
+            assert self.current_job.walltime != None and self.current_job.walltime != -1
+            start = self.current_alloc[0][1]
+            stop  = start + self.current_job.walltime
+
+            print("------")
+            self.freeSpaceList.add_reservation(allocs, self.current_job.id, start, stop)
+            self.current_job = None
+            self.current_alloc = []
+
+            reward = self._get_reward()
+        elif action != (-1, -1) :
+            # Agregar acción a self.curernt_allocs
+            action = (int(action[0]), action[1]+self.freeSpaceList.curr_time)
+
+            for i in self.current_alloc:
+                assert i[0] != action[0]
+                assert i[1] == action[1]
+
+
+            self.current_alloc.append(action)
+            print(self.simulator.current_time, "step: current allocs ==", self.current_alloc)
+            reward = self._get_reward()
+
+        print("DDDD")
+        # Try schedule
+        self._test_schedule()
+        for i in self.freeSpaceList.items:
+            if len(i.hosts) == 0:
+                print(i.job)
 
         obs  = self._get_state()
         done = not self.simulator.is_running
         info = { "workload": self. workload }
         return obs, reward, done, info
 
-    def _test_schedule(self):
-        to_be_handled = [ (i.job, i.hosts) for i in self.freeSpaceList.items if i.start == self.freeSpaceList.curr_time and not i.started and i.full ]
-        print(">>>", to_be_handled)
-        print(">>>", [ i for i in self.freeSpaceList.items if i.full ])
-        print(">>>", [ i for i in self.freeSpaceList.items ])
+    def _time_step(self):
+        self.simulator.proceed_time(self.t_action)
+        self.freeSpaceList.update_time(self.simulator.current_time)
 
-        for i, j in to_be_handled:
-            self.freeSpaceList.start_job(i)
-            self.simulator.allocate(str(i), list(j))
-            
+    def _test_schedule(self):
+        current_time = self.freeSpaceList.curr_time
+        jobs = filter(lambda x: x.start == current_time and not x.started and x.full, self.freeSpaceList.items)
+
+        for i in set(jobs):
+            print("scheduled", i.job)
+            self.freeSpaceList.start_job(i.job)
+            self.simulator.allocate(str(i.job), [int(j) for j in i.hosts])
 
     def _schedule_jobs(self):
         # TODO: handle dependencies
@@ -162,17 +235,16 @@ class PerCoreEnv(GridEnv):
         to_be_handled = { (i.job, i.hosts) for i in self.freeSpaceList.items if i.start == self.freeSpaceList.curr_time and not i.started }
         print(">>>", to_be_handled)
         for i, j in to_be_handled:
-            self.simulator.allocate(str(i), list(j))
+            self.simulator.allocate(str(i), [ int(k) for k in j])
             self.freeSpaceList.start_job(i)
 
-        # TODO: si de un time step a otro se nos paso una tarea echarla a andar o tirar error? 
+        # TODO: si de un time step a otro se nos paso una tarea echarla a andar o tirar error?
 
         # Update running_jobs state
         self.simulator.proceed_time(self.t_action)
         curr_time = self.simulator.current_time
         print(curr_time)
         self.freeSpaceList.update_time(curr_time)
-
 
     def _get_next_job(self):
         jobs = [ i for i in self.simulator.queue if i.id not in self.freeSpaceList.jobs ]
@@ -191,11 +263,7 @@ class PerCoreEnv(GridEnv):
         # 2. Aprox duration change. -- Less is better, only after first alloc.
 
         # 3. Energy consumption
-        try:
-            hosts  = [ self.simulator.platform.get_host(int(i)) for i,_ in self.current_alloc ]
-        except Exception as e:
-            print( self.current_alloc )
-            return
+        hosts  = [ self.simulator.platform.get_host(int(i)) for i,_ in self.current_alloc ]
         assert np.all([ i is not None for i in hosts ])
 
         #old_ec = np.mean([ host.power for host in hosts[:-1]])
@@ -215,33 +283,32 @@ class PerCoreEnv(GridEnv):
 
         ## Posible spaces
 
-        # 1. Si no hay espacios elegidos, listamos todos
-        if len(self.current_alloc) == 0:
-            posible_spaces = self.freeSpaceList.get_posible_spaces(duration, self.current_job.res)
-        else:
-            pass
-        # 2. Si ya hay al menos 1, damos solo los que estan en el mismo rango horario
-            #cores = {i[0] for i in self.current_alloc}
-            posible_spaces = self.freeSpaceList.get_posible_spaces(duration, self.current_job.res)
-            #posible_space = filter(lambda x: x.start == self.current_alloc[0][1] and x.end == self.current_alloc[0][1] + duration, posible_spaces)
+        posible_spaces = self.freeSpaceList.get_posible_spaces(duration, self.current_job.res)
+        if len(self.current_alloc) != 0:
+            # 2. Si ya hay al menos 1 alloc, damos solo los que estan en el mismo rango horario
+            start, end = self.current_alloc[0][1], self.current_alloc[0][1] + duration
+            cores = {i[0] for i in self.current_alloc}
 
-            #print(list(posible_space))
+            posible_spaces = list(filter(lambda x: x.start == start and x.end == end, posible_spaces))
+            for i in posible_spaces:
+                i.hosts -= cores
 
-            #posible_spaces = self.freeSpaceList._check_range(self.current_alloc[0][1], self.current_alloc[0][1]+ duration)
-            #print(self.current_alloc, duration)
-            #posible_spaces = list(filter(lambda x: len(x.hosts.intersection(cores)) == 0 , posible_spaces))
+        all_spaces = []
+        for i in posible_spaces:
+            for j in i.hosts:
+                all_spaces.append(FreeSpace({j}, i.start, i.end))
 
-        #print("state: ", [ i for i in posible_spaces if 0 in i.hosts ] )
+        ## Spaces stats
 
-        space_stats = np.zeros((len(posible_spaces), 4))
+        space_stats = np.zeros((len(all_spaces), 4))
         # 0 . core_id
         # 1 . wait_time
         # 2 . Energy consum
         # 3 . Estimated_exec_time
-        for i, j in enumerate(posible_spaces):
+        for i, j in enumerate(all_spaces):
             #assert len(j.hosts) == 1
             # TODO: How to choose first host on first assig
-            space_stats[i,0] = list(j.hosts)[0] 
+            space_stats[i,0] = list(j.hosts)[0]
             space_stats[i,1] = j.start - self.freeSpaceList.curr_time
             space_stats[i,2] = self.simulator.platform.get_host(list(j.hosts)[0]).power
             # TODO usar tiempo estimado con velocidad y no end - start
@@ -252,13 +319,13 @@ class PerCoreEnv(GridEnv):
         # 0 . wait_time
         # 1 . expected_compute
         # 2 . cant of cores alloced
-        # 3 . cant of cores needed 
+        # 3 . cant of cores needed
         job_stats[0] = -1 if len(self.current_alloc) == 0 else self.current_alloc[0][0]
         job_stats[1] = len(self.current_alloc)
         job_stats[2] = self.current_job.res
 
         state["posible_spaces"] = space_stats
-        state["current_job"]    = job_stats 
+        state["current_job"]    = job_stats
 
         return state
 
@@ -267,12 +334,18 @@ class PerCoreEnv(GridEnv):
         if self.simulator.is_running:
             nb_hosts = len(list(self.simulator.platform.hosts))
 
+        all_cant  = 0
         if self.current_job != None:
             cores = self.current_job.res
             duration = 1000 if self.current_job.walltime == None else int(self.current_job.walltime)
-            spaces_cant = len(list(self.freeSpaceList.get_posible_spaces(cores, duration)))
+            spaces_cant = self.freeSpaceList.get_posible_spaces(cores, duration)
 
-        posible_spaces = spaces.Box(low=0, high=self.max_plan_time, shape=(spaces_cant, 4))
+            for i in spaces_cant:
+                assert len(i.hosts) != 0
+                for j in i.hosts:
+                    all_cant += 1
+
+        posible_spaces = spaces.Box(low=0, high=self.max_plan_time, shape=(all_cant, 4))
         current_job    = spaces.Box(low=0, high=self.max_plan_time, shape=(3,))
 
         obs_space = spaces.Dict({

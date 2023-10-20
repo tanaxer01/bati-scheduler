@@ -28,7 +28,7 @@ class AgentWrapper:
         if np.random.uniform(0,1) > eps:
             choice = np.random.choice(posible_spaces.shape[0])
             print("act: exploration", posible_spaces[choice,0:2])
-            return posible_spaces[choice,0:2] 
+            return tuple(posible_spaces[choice,0:2])
 
         max_score, best_act  = None, None
         scores = self._predict_scores(posible_spaces, current_job)
@@ -121,7 +121,7 @@ class AgentWrapper:
             state = env.reset()
             score = 0
 
-            for t in range(max_t): 
+            for t in range(max_t):
                 action = self.act(state, eps)
                 next_state, reward, done, _ = env.step(action)
 
@@ -168,10 +168,10 @@ class AgentWrapper:
             history['steps'] += 1
             history['info'] = info
 
-            #if history["steps"] == 5:
+            #if history["steps"] == 74:
             #    break
-            if history["score"] < -100:
-                break
+            #if history["score"] < -100:
+            #    break
 
             eps = max(eps*eps_decay, eps_end)
 
