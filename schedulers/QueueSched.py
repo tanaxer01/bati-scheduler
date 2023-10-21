@@ -25,7 +25,11 @@ class AgentWrapper:
 
         # Get valid jobs for this step.
         nb_available = len(platform["agenda"]) - sum(1 for i in platform["agenda"] if i[1] != 0)
-        job_pos = ( i for i, j in enumerate(queue["jobs"]) if 0 < j[1] <= nb_available)
+        job_pos = [ i for i, j in enumerate(queue["jobs"]) if 0 < j[1] <= nb_available ]
+
+        # No hosts
+        if len(job_pos) == 0:
+            return 0
 
         # Exploration vs Explotation
         if np.random.uniform(0, 1) > eps:
@@ -33,15 +37,15 @@ class AgentWrapper:
 
         ## Job specific info
         # TODO - Refactore ones ready
-        job_cant  = sum(1 for _ in job_pos)
-        job_state = np.zeros( (job_cant, 2) )
+        job_cant  = len(job_pos)
+        job_state = np.zeros( (job_cant, 4) )
 
         for i, j in enumerate(job_pos):
-            job_state[i, 0] = j                                             # Job idx
-            job_state[i, 1] = obs["current_time"] - obs["queue"][0]         # Wait time
-            job_state[i, 2] = obs["queue"][1] / obs["platform"]["nb_hosts"] # Resources
+            job_state[i, 0] = j                                                        # Job idx
+            job_state[i, 1] = obs["current_time"] - obs["queue"]["jobs"][j][0]         # Wait time
+            job_state[i, 2] = obs["queue"]["jobs"][j][1] / obs["platform"]["nb_hosts"] # Resources
             # TODO - Change 3 for Estim. vs Wall
-            job_state[i, 3] = obs["queue"][2] / MAX_WALL                    # Wall time
+            job_state[i, 3] = obs["queue"]["jobs"][j][2] / MAX_WALL                    # Wall time
 
         ## Queue general info
 
@@ -56,6 +60,7 @@ class AgentWrapper:
         # Calc scores.
         max_score, best_act = None, None
         scores = self._score_jobs(inputs)
+
         for i, (act, *_) in enumerate(inputs):
             score = scores[i]
             if not max_score or score > max_score:
@@ -63,22 +68,19 @@ class AgentWrapper:
                 best_act  = act
 
         # Choose the best job
-        assert best_act != None, "Todo check dis case"
+        assert best_act != None, f"Todo check dis case\n{scores}\n{list(job_pos)}"
         return best_act
 
     def _score_jobs(self, queue):
         outputs = np.zeros( queue.shape[0] )
 
-        for i, *j in enumerate(queue):
+        for i, j in enumerate(queue):
             with torch.no_grad():
                 obs  = torch.from_numpy(j).float().unsqueeze(0).to(device)
                 pred = self.agent.qnetwork_local(obs)
                 outputs[i] = np.argmax(pred)
 
         return outputs
-
-
-        return []
 
     def train(self) -> None:
         raise NotImplementedError("TODO - implement dis")
@@ -99,10 +101,7 @@ class AgentWrapper:
             history['steps'] += 1
             history['info']   = info
 
-            print(f"STEP {history['steps']}")
-
-            #if history["steps"] == 10:
-            #    break
+            #print(f"STEP {history['steps']}")
 
             eps_start = max(eps_start * eps_decay, eps_end)
 

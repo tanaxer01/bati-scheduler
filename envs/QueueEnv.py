@@ -1,11 +1,52 @@
-
-from gym import error, spaces
-from typing import Any, Optional, Tuple
-from gridgym.envs.grid_env import GridEnv
-
 import numpy as np
 
+from gym import error, spaces
+from batsim_py import SimulatorHandler, SimulatorEvent, HostEvent
+from batsim_py.resources import Host
+from gridgym.envs.grid_env import GridEnv
+from typing import Any, Optional, Tuple, Dict
+
+
 INF = float('inf')
+
+class ShutdownPolicy():
+    def __init__(self, timeout: int, simulator: SimulatorHandler):
+        super().__init__()
+        self.timeout = timeout
+        self.simulator = simulator
+        self.idle_servers: Dict[int, float] = {}
+
+        self.simulator.subscribe(
+            HostEvent.STATE_CHANGED, self._on_host_state_changed)
+        self.simulator.subscribe(
+            SimulatorEvent.SIMULATION_BEGINS, self._on_sim_begins)
+
+    def shutdown_idle_hosts(self, *args, **kwargs):
+        hosts_to_turnoff = []
+        for h_id, start_t in list(self.idle_servers.items()):
+            if self.simulator.current_time - start_t >= self.timeout:
+                hosts_to_turnoff.append(h_id)
+                del self.idle_servers[h_id]
+
+        if hosts_to_turnoff:
+            self.simulator.switch_off(hosts_to_turnoff)
+
+    def _on_host_state_changed(self, host: Host):
+        if host.is_idle:
+            if host.id not in self.idle_servers:
+                self.idle_servers[host.id] = self.simulator.current_time
+                t = self.simulator.current_time + self.timeout
+                self.simulator.set_callback(t, self.shutdown_idle_hosts)
+        else:
+            self.idle_servers.pop(host.id, None)
+
+    def _on_sim_begins(self, _):
+        self.idle_servers.clear()
+        for h in self.simulator.platform.hosts:
+            if h.is_idle:
+                self.idle_servers[h.id] = self.simulator.current_time
+                t = self.simulator.current_time + self.timeout
+                self.simulator.set_callback(t, self.shutdown_idle_hosts)
 
 class QueueEnv(GridEnv):
     def __init__(self,
@@ -33,18 +74,23 @@ class QueueEnv(GridEnv):
 
         #self.simulator.subscribe(
         #    batsim_py.JobEvent.COMPLETED, self._on_job_completed)
-        #self.shutdown_policy = ShutdownPolicy(t_shutdown, self.simulator)
+        self.shutdown_policy = ShutdownPolicy(t_shutdown, self.simulator)
 
     def step(self, action) -> Tuple[Any, float, bool, dict]:
         assert self.simulator.is_running and self.simulator.platform
         assert 0 <= action <= self.queue_max_len , f"Invalid aciton {action}."
 
+        print(f"{self.simulator.current_time} step -- {len(self.simulator.queue)} {action}")
+
         # action > 0 -> place in list 
         scheduled, reward = False, 0.
         if action > 0:
-            # TODO - sort queue.
-            sorted_queue = []
-            scheduled = True
+            job = self.simulator.queue[int(action)-1]
+            available = self.simulator.platform.get_not_allocated_hosts()
+            if job.res <= len(available):
+                res = [h.id for h in available[:job.res]]
+                self.simulator.allocate(job.id, res)
+                scheduled = True
 
         if not scheduled:
             reward = self._get_reward()
@@ -56,7 +102,20 @@ class QueueEnv(GridEnv):
         return (obs, reward, done, info)
 
     def _get_reward(self) -> float:
-        return 0.
+        nb_hosts = sum( 1 for _ in self.simulator.platform.hosts )
+        # QoS
+        wait_t = sum( 
+                     1./j.walltime if j.walltime else 1 for j in self.simulator.queue[:self.queue_max_len] ) / nb_hosts
+
+        # Energy waste
+        energy_score = sum( 1. for h in self.simulator.platform.hosts if h.is_idle )
+        energy_score /= nb_hosts
+        
+        # Utilization
+        u = sum(1. for h in self.simulator.platform.hosts if h.is_computing)
+        u /= nb_hosts
+
+        return u - energy_score - wait_t
 
     def _get_state(self) -> Any:
         # Queue 

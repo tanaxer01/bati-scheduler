@@ -1,3 +1,4 @@
+import batsim_py
 
 from envs.QueueEnv     import QueueEnv
 from envs.per_core_env import PerCoreEnv
@@ -38,15 +39,31 @@ def run_gym():
                     t_shutdown = 500,
                     hosts_per_server = 1)
 
-    ini_state = env.reset()
+    jobs_mon = batsim_py.monitors.JobMonitor(env.simulator)
+    sim_mon  = batsim_py.monitors.SimulationMonitor(env.simulator)
+    schedule_mon  = batsim_py.monitors.SchedulerMonitor(env.simulator)
 
-    state_size  = (ini_state["queue"]["size"] * 3 + 1) + (ini_state["platform"]["nb_hosts"]*3 + 1) + 1
+    ini_state = env.reset()
+    state_size = 9
     action_size = env.action_space.n
 
     agent = QueueAgent(state_size, action_size, 0)
-    agent.play(env, False)
+
+    #agent.train()
+    
+
+    hist = {}
+    #hist = agent.play(env, True)
+
+    print("[DONE]")
+    return jobs_mon, sim_mon, schedule_mon, hist
 
 
 if __name__ == "__main__":
-    run_gym()
     #run_per_core()
+
+    jobs_df, sim_df, schedule_df, _ = run_gym()
+
+    jobs_df.to_csv("/data/expe-out/jobs-DQN.out")
+    sim_df.to_csv("/data/expe-out/sim-DQN.out")
+    schedule_df.to_csv("/data/expe-out/schedule-DQN.out")
