@@ -2,10 +2,12 @@ import numpy as np
 
 from gym import error, spaces
 import xml.etree.ElementTree as ET
-from batsim_py import SimulatorHandler, SimulatorEvent, HostEvent, JobEvent
-from batsim_py.resources import Host
-from gridgym.envs.grid_env import GridEnv
+from gridgym.envs.grid_env import GridEnv, batsim_py
 from typing import Any, Optional, Tuple, Dict
+
+from batsim_py.jobs import Job
+from batsim_py.resources import Host
+from batsim_py import SimulatorHandler, SimulatorEvent, HostEvent, JobEvent
 
 
 INF = float('inf')
@@ -73,11 +75,10 @@ class QueueEnv(GridEnv):
                          external_events_fn, simulation_time, True,
                          hosts_per_server=hosts_per_server)
 
-        self.simulator.subscribe(
-                JobEvent.SUBMITTED, self._on_job_submitted)
-
         #self.simulator.subscribe(
-        #    batsim_py.JobEvent.COMPLETED, self._on_job_completed)
+        #        JobEvent.SUBMITTED, self._on_job_submitted)
+
+        self.simulator.subscribe(JobEvent.COMPLETED, self._on_job_completed)
         self.shutdown_policy = ShutdownPolicy(t_shutdown, self.simulator)
 
         root = ET.parse(platform_fn).getroot()
@@ -88,10 +89,10 @@ class QueueEnv(GridEnv):
         self.host_speeds = { h.attrib["id"]: to_int(h.get("speed").split(",")[0][:-1])
                                 for h in root.iter("host") }
 
-    def _on_job_submitted(self, job):
-        pass
+        self.running_jobs = {}
 
-
+    def _on_job_completed(self, job):
+        self.running_jobs.pop( job.id )
 
     def step(self, action) -> Tuple[Any, float, bool, dict]:
         assert self.simulator.is_running and self.simulator.platform
@@ -105,6 +106,7 @@ class QueueEnv(GridEnv):
             if job.res <= len(available):
                 res = [h.id for h in available[:job.res]]
                 self.simulator.allocate(job.id, res)
+                self.running_jobs[job.id] = [h.name for h in available[:job.res]]
                 scheduled = True
 
         if not scheduled:
@@ -116,11 +118,27 @@ class QueueEnv(GridEnv):
         info = {"workload": self.workload}
         return (obs, reward, done, info)
 
+    def _get_job_obj(self, id) -> Job:
+        res = next( filter(lambda x: x.id == id, self.simulator.jobs) )
+        assert res != None, "If job is in self.running_jobs it can't be None"
+
+        return res
+
     def _get_reward(self) -> float:
-        print(">", [ i for i in self.simulator.agenda ])
+        job_objs = [ self._get_job_obj(i) for i in self.running_jobs ]
+        job_objs = list(filter(lambda x: hasattr(x.profile, "cpu"), job_objs))
+
+        job_slower_res = [ min(map(lambda x: self.host_speeds[x], i))
+                                        for i in self.running_jobs.values() ]
+
+        expected_turnaround = [ i.profile.cpu / j for i,j in zip(job_objs, job_slower_res) ]
+        waiting_time = [ i.waiting_time if i.waiting_time != None else 0 for i in job_objs ]
+
+        r = [ 1 / np.log(i + j) for i, j in zip(expected_turnaround, waiting_time) ]
 
 
-
+        return sum(r)
+        '''
         nb_hosts = sum( 1 for _ in self.simulator.platform.hosts )
         # QoS
         wait_t = sum(
@@ -135,6 +153,7 @@ class QueueEnv(GridEnv):
         u /= nb_hosts
 
         return u - energy_score - wait_t
+        '''
 
     def _get_state(self) -> Any:
         # Queue

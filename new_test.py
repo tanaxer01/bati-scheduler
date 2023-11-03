@@ -1,5 +1,6 @@
 import batsim_py
 
+from envs.final_env    import DspEnv
 from envs.QueueEnv     import QueueEnv
 from envs.per_core_env import PerCoreEnv
 
@@ -50,20 +51,39 @@ def run_gym():
     agent = QueueAgent(state_size, action_size, 0)
 
     #agent.train()
-    
+
 
     hist = {}
-    #hist = agent.play(env, True)
+    hist = agent.play(env, True)
 
     print("[DONE]")
     return jobs_mon, sim_mon, schedule_mon, hist
 
+def run_final():
+    print("[RUNNING]")
+
+    env = DspEnv(platform_fn = "/data/platforms/FatTree/generated.xml",
+                    workloads_dir = "/data/workloads/test",
+                    t_action = 10,
+                    queue_max_len = 20,
+                    t_shutdown = 500,
+                    hosts_per_server = 1)
+
+    agent = QueueAgent(9, 1, 0)
+    agent.play(env, True)
+
+
+
 
 if __name__ == "__main__":
     #run_per_core()
+    #run_final()
+    run_gym()
 
+    '''
     jobs_df, sim_df, schedule_df, _ = run_gym()
 
     jobs_df.to_csv("/data/expe-out/jobs-DQN.out")
     sim_df.to_csv("/data/expe-out/sim-DQN.out")
     schedule_df.to_csv("/data/expe-out/schedule-DQN.out")
+    '''
