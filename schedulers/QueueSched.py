@@ -15,6 +15,7 @@ class AgentWrapper:
         self.agent = Agent(state_size, action_size, seed)
 
     def act(self, obs, eps) -> int:
+        #states = self._proces_state(obs)
         queue        = obs["queue"]
         platform     = obs["platform"]
         current_time = obs["current_time"]
@@ -23,9 +24,11 @@ class AgentWrapper:
         if queue["size"] == 0:
             return 0
 
+
         # Get valid jobs for this step.
         nb_available = len(platform["agenda"]) - sum(1 for i in platform["agenda"] if i[1] != 0)
         job_pos = [ i for i, j in enumerate(queue["jobs"]) if 0 < j[1] <= nb_available ]
+
 
         # No hosts
         if len(job_pos) == 0:
@@ -57,6 +60,7 @@ class AgentWrapper:
         state /= obs['platform']['agenda'].shape[0]
 
         inputs = np.hstack( (job_state, np.tile(state, (job_state.shape[0], 1))) )
+
         # Calc scores.
         max_score, best_act = None, None
         scores = self._score_jobs(inputs)
@@ -70,6 +74,37 @@ class AgentWrapper:
         # Choose the best job
         assert best_act != None, f"Todo check dis case\n{scores}\n{list(job_pos)}"
         return best_act
+
+    def _process_state(self, state):
+        platform = state["platform"]
+        queue = state["queue"]
+
+        # Get valid jobs for this step.
+        nb_available = len(["agenda"]) - sum(1 for i in platform["agenda"] if i[1] != 0)
+        job_pos = [ i for i, j in enumerate(queue["jobs"]) if 0 < j[1] <= nb_available ]
+
+        ## Job specific info
+        # TODO - Refactore ones ready
+        job_cant  = len(job_pos)
+        job_state = np.zeros( (job_cant, 4) )
+
+        for i, j in enumerate(job_pos):
+            job_state[i, 0] = j                                             # Job idx
+            job_state[i, 1] = state["current_time"] - queue["jobs"][j][0]   # Wait time
+            job_state[i, 2] = queue["jobs"][j][1] / platform["nb_hosts"]    # Resources
+            # TODO - Change 3 for Estim. vs Wall
+            job_state[i, 3] = queue["jobs"][j][2] / MAX_WALL                # Wall time
+
+        ## Queue general info
+
+        ## Platform info
+        # 1. Resource state
+        state = np.zeros(5)
+        for host in platform['status']:
+            state[int(host) - 1] += 1
+        state /= platform['agenda'].shape[0]
+
+        states = np.hstack( (job_state, np.tile(state, (job_state.shape[0], 1))) )
 
     def _score_jobs(self, queue):
         outputs = np.zeros( queue.shape[0] )

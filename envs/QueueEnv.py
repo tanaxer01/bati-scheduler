@@ -1,7 +1,8 @@
 import numpy as np
 
 from gym import error, spaces
-from batsim_py import SimulatorHandler, SimulatorEvent, HostEvent
+import xml.etree.ElementTree as ET
+from batsim_py import SimulatorHandler, SimulatorEvent, HostEvent, JobEvent
 from batsim_py.resources import Host
 from gridgym.envs.grid_env import GridEnv
 from typing import Any, Optional, Tuple, Dict
@@ -65,24 +66,38 @@ class QueueEnv(GridEnv):
                               f"than zero, got {t_action}.")
 
 
-        self.queue_max_len = queue_max_len 
+        self.queue_max_len = queue_max_len
         self.t_action = t_action
-        
+
         super().__init__(platform_fn, workloads_dir, seed,
                          external_events_fn, simulation_time, True,
                          hosts_per_server=hosts_per_server)
+
+        self.simulator.subscribe(
+                JobEvent.SUBMITTED, self._on_job_submitted)
 
         #self.simulator.subscribe(
         #    batsim_py.JobEvent.COMPLETED, self._on_job_completed)
         self.shutdown_policy = ShutdownPolicy(t_shutdown, self.simulator)
 
+        root = ET.parse(platform_fn).getroot()
+
+        prefixes = { "G": 10e9, "M": 10e6, "K": 10e3 }
+        to_int = lambda x: float(x[:-1]) * prefixes[x[-1]]
+
+        self.host_speeds = { h.attrib["id"]: to_int(h.get("speed").split(",")[0][:-1])
+                                for h in root.iter("host") }
+
+    def _on_job_submitted(self, job):
+        pass
+
+
+
     def step(self, action) -> Tuple[Any, float, bool, dict]:
         assert self.simulator.is_running and self.simulator.platform
         assert 0 <= action <= self.queue_max_len , f"Invalid aciton {action}."
 
-        print(f"{self.simulator.current_time} step -- {len(self.simulator.queue)} {action}")
-
-        # action > 0 -> place in list 
+        # action > 0 -> place in list
         scheduled, reward = False, 0.
         if action > 0:
             job = self.simulator.queue[int(action)-1]
@@ -102,15 +117,19 @@ class QueueEnv(GridEnv):
         return (obs, reward, done, info)
 
     def _get_reward(self) -> float:
+        print(">", [ i for i in self.simulator.agenda ])
+
+
+
         nb_hosts = sum( 1 for _ in self.simulator.platform.hosts )
         # QoS
-        wait_t = sum( 
+        wait_t = sum(
                      1./j.walltime if j.walltime else 1 for j in self.simulator.queue[:self.queue_max_len] ) / nb_hosts
 
         # Energy waste
         energy_score = sum( 1. for h in self.simulator.platform.hosts if h.is_idle )
         energy_score /= nb_hosts
-        
+
         # Utilization
         u = sum(1. for h in self.simulator.platform.hosts if h.is_computing)
         u /= nb_hosts
@@ -118,12 +137,12 @@ class QueueEnv(GridEnv):
         return u - energy_score - wait_t
 
     def _get_state(self) -> Any:
-        # Queue 
+        # Queue
         queue = {
-            "size": len(self.simulator.queue), 
+            "size": len(self.simulator.queue),
             "jobs": np.zeros( (self.queue_max_len, 3) )
         }
-    
+
         # TODO - Add estimated length
         for i, job in enumerate(self.simulator.queue[:self.queue_max_len]):
             wall = -1 if job.walltime is None else job.walltime
@@ -155,10 +174,10 @@ class QueueEnv(GridEnv):
                     i.walltime or -1
                 ]
 
-        state = { 
-            "queue": queue, 
-            "platform": platform, 
-            "current_time": self.simulator.current_time 
+        state = {
+            "queue": queue,
+            "platform": platform,
+            "current_time": self.simulator.current_time
         }
 
         return state
