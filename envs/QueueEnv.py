@@ -98,6 +98,10 @@ class QueueEnv(GridEnv):
         assert self.simulator.is_running and self.simulator.platform
         assert 0 <= action <= self.queue_max_len , f"Invalid aciton {action}."
 
+
+        if action == 0:
+            print("!!!!", len(self.simulator.queue), len(self.simulator.platform.get_not_allocated_hosts()) )
+
         # action > 0 -> place in list
         scheduled, reward = False, 0.
         if action > 0:

@@ -32,6 +32,7 @@ class AgentWrapper:
 
         # No hosts
         if len(job_pos) == 0:
+            print("XXX")
             return 0
 
         # Exploration vs Explotation
@@ -73,7 +74,7 @@ class AgentWrapper:
 
         # Choose the best job
         assert best_act != None, f"Todo check dis case\n{scores}\n{list(job_pos)}"
-        return best_act
+        return best_act + 1
 
     def _process_state(self, state):
         platform = state["platform"]
