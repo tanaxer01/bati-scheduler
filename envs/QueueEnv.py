@@ -156,14 +156,22 @@ class QueueEnv(GridEnv):
         '''
 
     def _get_state(self) -> Any:
+        nb_hosts = sum( 1 for _ in self.simulator.platform.hosts)
+
         # Queue
         queue = {
             "size": len(self.simulator.queue),
-            "jobs": np.zeros( (self.queue_max_len, 3) )
+            "jobs": np.full((self.queue_max_len, 3), -1)
         }
 
         # TODO - Add estimated length
-        for i, job in enumerate(self.simulator.queue[:self.queue_max_len]):
+        valid_jobs = [ j for j in self.simulator.queue if j.res <= nb_hosts ]
+
+        if len(valid_jobs) > self.queue_max_len:
+            valid_jobs = valid_jobs[:self.queue_max_len]
+
+
+        for i, job in enumerate(valid_jobs):
             wall = -1 if job.walltime is None else job.walltime
             queue["jobs"][i] = [
                 job.subtime,
@@ -172,7 +180,6 @@ class QueueEnv(GridEnv):
             ]
 
         # Platform
-        nb_hosts = sum( 1 for _ in self.simulator.platform.hosts)
         platform = {
             "nb_hosts": nb_hosts,
             "status": np.array(
