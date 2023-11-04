@@ -89,23 +89,26 @@ class QueueEnv(GridEnv):
         self.host_speeds = { h.attrib["id"]: to_int(h.get("speed").split(",")[0][:-1])
                                 for h in root.iter("host") }
 
-        self.running_jobs = {}
+        self.running_jobs  = dict()
+        self.completed_jobs = set()
 
     def _on_job_completed(self, job):
-        self.running_jobs.pop( job.id )
+        self.completed_jobs.add(job.id)
+        self.running_jobs.pop(job.id)
 
     def step(self, action) -> Tuple[Any, float, bool, dict]:
         assert self.simulator.is_running and self.simulator.platform
         assert 0 <= action <= self.queue_max_len , f"Invalid aciton {action}."
 
 
-        if action == 0:
-            print("!!!!", len(self.simulator.queue), len(self.simulator.platform.get_not_allocated_hosts()) )
+        #if action == 0:
+        #    print("!!!!", self.simulator.current_time ,len(self.simulator.queue), len(self.simulator.platform.get_not_allocated_hosts()) )
 
         # action > 0 -> place in list
         scheduled, reward = False, 0.
         if action > 0:
             job = self.simulator.queue[int(action)-1]
+
             available = self.simulator.platform.get_not_allocated_hosts()
             if job.res <= len(available):
                 res = [h.id for h in available[:job.res]]
@@ -123,20 +126,43 @@ class QueueEnv(GridEnv):
         return (obs, reward, done, info)
 
     def _get_job_obj(self, id) -> Job:
-        res = next( filter(lambda x: x.id == id, self.simulator.jobs) )
-        assert res != None, "If job is in self.running_jobs it can't be None"
+        jobs = [ i for i in self.simulator.jobs if i.id == id ]
+        #assert len(jobs) == 1, "If job is in self.running_jobs it can't be None"
 
-        return res
+        if len(jobs):
+            return jobs[0]
 
     def _get_reward(self) -> float:
-        job_objs = [ self._get_job_obj(i) for i in self.running_jobs ]
-        job_objs = list(filter(lambda x: hasattr(x.profile, "cpu"), job_objs))
+
+        ## FILTERING
+        # Running jobs
+        jobs = filter(lambda x: x.id in self.running_jobs, self.simulator.jobs)
+
+        # Computing jobs
+        jobs = list(filter(lambda x: hasattr(x.profile, "cpu"), jobs))
+
+        # Check dependencies
+        dependencies = map(lambda x: x.metadata["dependencies"]
+                                if "dependencies" in x.metadata else [], jobs)
+        deps_status  = [ sum(j not in self.completed_jobs for j in i) == 0
+                                                        for i in dependencies ]
+
+        jobs = [ i for i, j in zip(jobs, deps_status) if j == True ]
+
+
+        #job_objs = [ self._get_job_obj(i) for i in self.running_jobs ]
+        #job_objs = [ i for i in job_objs if i ]
+
+        #job_objs = list(filter(lambda x: hasattr(x.profile, "cpu"), job_objs))
 
         job_slower_res = [ min(map(lambda x: self.host_speeds[x], i))
                                         for i in self.running_jobs.values() ]
 
-        expected_turnaround = [ i.profile.cpu / j for i,j in zip(job_objs, job_slower_res) ]
-        waiting_time = [ i.waiting_time if i.waiting_time != None else 0 for i in job_objs ]
+        #expected_turnaround = [ i.profile.cpu / j for i,j in zip(job_objs, job_slower_res) ]
+        expected_turnaround = [ i.profile.cpu / j for i,j in zip(jobs, job_slower_res) ]
+
+        #waiting_time = [ i.waiting_time if i.waiting_time != None else 0 for i in job_objs ]
+        waiting_time = [ i.waiting_time if i.waiting_time != None else 0 for i in jobs ]
 
         r = [ 1 / np.log(i + j) for i, j in zip(expected_turnaround, waiting_time) ]
 
