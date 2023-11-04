@@ -155,11 +155,11 @@ class QueueEnv(GridEnv):
 
         #job_objs = list(filter(lambda x: hasattr(x.profile, "cpu"), job_objs))
 
-        job_slower_res = [ min(map(lambda x: self.host_speeds[x], i))
+        job_slowest_res = [ min(map(lambda x: self.host_speeds[x], i))
                                         for i in self.running_jobs.values() ]
 
-        #expected_turnaround = [ i.profile.cpu / j for i,j in zip(job_objs, job_slower_res) ]
-        expected_turnaround = [ i.profile.cpu / j for i,j in zip(jobs, job_slower_res) ]
+        #expected_turnaround = [ i.profile.cpu / j for i,j in zip(job_objs, job_slowest_res) ]
+        expected_turnaround = [ i.profile.cpu / j for i,j in zip(jobs, job_slowest_res) ]
 
         #waiting_time = [ i.waiting_time if i.waiting_time != None else 0 for i in job_objs ]
         waiting_time = [ i.waiting_time if i.waiting_time != None else 0 for i in jobs ]
