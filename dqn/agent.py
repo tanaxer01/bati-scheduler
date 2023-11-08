@@ -2,6 +2,7 @@
 import math
 import random
 from itertools import count
+from sys import platform
 
 import torch
 import torch.nn as nn
@@ -26,6 +27,7 @@ TAU = 0.005
 LR = 1e-4
 
 NUM_EPISODES = 2
+MAX_WALL = 2000
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -48,17 +50,30 @@ class Agent():
 
 
     def act(self, obs):
-
         eps_threshold = EPS_END + (EPS_START - EPS_END) * \
                                     math.exp(-1. * self.steps_done / EPS_DECAY)
         self.steps_done += 1
 
-        if random.random() <= eps_threshold:
-            # TODO - Random action
-            pass
+        # No jobs to assign
+        if sum(obs[:,0]) == 0:
+            return 0
 
+        if random.random() <= eps_threshold:
+            # TODO - Exploration
+            print(res := random.randint(1,obs.shape[0] + 1))
+            return res
+
+        # TODO - DQN -> ConvDQN
         # TODO - Explotation
-        return torch.zeros(2)
+        scores = self._predict_scores(obs)
+
+
+
+        return 0
+
+
+    def _predict_scores(self, states):
+        return []
 
 
     def optimize_model(self):
@@ -71,12 +86,22 @@ class Agent():
         # to Transition of batch-arrays.
         batch = Transition(*zip(*transitions))
 
+
+        # Compute a mask of non-final states and concatenate the batch elements
+        # (a final state would've been the one after which simulation ended)
+
+        #non_final_mask = torch.tensor(tuple(map(lambda s: s is not None,
+        #                    batch.next_state)), device=device, dtype=torch.bool)
+        #non_final_next_states = torch.cat([s for s in batch.next_state
+        #                                            if s is not None])
+
         # TODO - Non final ???
+        next_state_batch = torch.cat(batch.next_state)
 
         state_batch = torch.cat(batch.state)
         action_batch = torch.cat(batch.action)
         reward_batch = torch.cat(batch.reward)
-        next_state_batch = torch.cat(batch.next_state)
+
 
         # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
         # columns of actions taken. These are the actions which would've been taken
@@ -87,9 +112,14 @@ class Agent():
 
 
         # Compute V(s_{t+1}) for all next states.
+        # Expected values of actions for non_final_next_states are computed based
+        # on the "older" target_net; selecting their best reward with max(1)[0].
+        # This is merged based on the mask, such that we'll have either the expected
+        # state value or 0 in case the state was final.
         next_state_values = torch.zeros(BATCH_SIZE, device=device)
         with torch.no_grad():
             # TODO - FIX
+            # next_state_values[non_final_mask] = target_net(non_final_next_states).max(1)[0]
             next_state_values = self.target_net(next_state_batch).max(1)[0]
 
         # Compute the expected Q values
@@ -121,10 +151,12 @@ class Agent():
                 obs, reward, done, _ = env.step(action.item())
                 reward = torch.tensor([reward], device=device)
 
+                # TODO - Check for terminal states
                 next_state = self._process_obs(obs)
 
                 # Store the transition in memory
-                self.memory.push(state, action, next_state, reward)
+                if action != 0:
+                    self.memory.push(state, action, next_state, reward)
 
                 # Move to the next state
                 state = next_state
@@ -158,7 +190,16 @@ class Agent():
         # plt.show()
 
     def _process_obs(self, obs):
-        queue = obs["queue"]
+        platform = obs["platform"]
+        queue    = obs["queue"]
+
+        res = torch.zeros(queue["jobs"].shape[0], 9)
+        for i, j in enumerate(queue["jobs"]):
+            res[i, 0] = j
+            res[i, 1] = obs["current_time"] - queue["jobs"][j][0]  # Waiting time
+            res[i, 2] = queue["jobs"][j][1] / platform["nb_hosts"] # Res needed
+            # TODO - Rev MAX_WALL value
+            res[i, 3] = queue["jobs"][j][2] / MAX_WALL             # Wall
 
 
         print(obs)

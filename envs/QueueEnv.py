@@ -100,10 +100,6 @@ class QueueEnv(GridEnv):
         assert self.simulator.is_running and self.simulator.platform
         assert 0 <= action <= self.queue_max_len , f"Invalid aciton {action}."
 
-
-        #if action == 0:
-        #    print("!!!!", self.simulator.current_time ,len(self.simulator.queue), len(self.simulator.platform.get_not_allocated_hosts()) )
-
         # action > 0 -> place in list
         scheduled, reward = False, 0.
         if action > 0:
@@ -125,19 +121,22 @@ class QueueEnv(GridEnv):
         info = {"workload": self.workload}
         return (obs, reward, done, info)
 
+    '''
     def _get_job_obj(self, id) -> Job:
         jobs = [ i for i in self.simulator.jobs if i.id == id ]
         #assert len(jobs) == 1, "If job is in self.running_jobs it can't be None"
 
         if len(jobs):
             return jobs[0]
+    '''
 
     def _get_reward(self) -> float:
 
-        ## FILTERING
-        # Running jobs
+        # 1. Get running jobs
         jobs = filter(lambda x: x.id in self.running_jobs, self.simulator.jobs)
 
+        # TODO - Why did I filter by dependencies xd.
+        '''
         # Computing jobs
         jobs = list(filter(lambda x: hasattr(x.profile, "cpu"), jobs))
 
@@ -148,87 +147,67 @@ class QueueEnv(GridEnv):
                                                         for i in dependencies ]
 
         jobs = [ i for i, j in zip(jobs, deps_status) if j == True ]
+        '''
 
-
-        #job_objs = [ self._get_job_obj(i) for i in self.running_jobs ]
-        #job_objs = [ i for i in job_objs if i ]
-
-        #job_objs = list(filter(lambda x: hasattr(x.profile, "cpu"), job_objs))
-
+        # 2. Calculating reward
         job_slowest_res = [ min(map(lambda x: self.host_speeds[x], i))
                                         for i in self.running_jobs.values() ]
 
-        #expected_turnaround = [ i.profile.cpu / j for i,j in zip(job_objs, job_slowest_res) ]
         expected_turnaround = [ i.profile.cpu / j for i,j in zip(jobs, job_slowest_res) ]
-
-        #waiting_time = [ i.waiting_time if i.waiting_time != None else 0 for i in job_objs ]
         waiting_time = [ i.waiting_time if i.waiting_time != None else 0 for i in jobs ]
 
         r = [ 1 / np.log(i + j) for i, j in zip(expected_turnaround, waiting_time) ]
 
 
         return sum(r)
-        '''
-        nb_hosts = sum( 1 for _ in self.simulator.platform.hosts )
-        # QoS
-        wait_t = sum(
-                     1./j.walltime if j.walltime else 1 for j in self.simulator.queue[:self.queue_max_len] ) / nb_hosts
-
-        # Energy waste
-        energy_score = sum( 1. for h in self.simulator.platform.hosts if h.is_idle )
-        energy_score /= nb_hosts
-
-        # Utilization
-        u = sum(1. for h in self.simulator.platform.hosts if h.is_computing)
-        u /= nb_hosts
-
-        return u - energy_score - wait_t
-        '''
 
     def _get_state(self) -> Any:
         nb_hosts = sum( 1 for _ in self.simulator.platform.hosts)
 
-        # Queue
-        queue = {
-            "size": len(self.simulator.queue),
-            "jobs": np.full((self.queue_max_len, 3), -1)
-        }
+        # 1. Get ready to schedule jobs.
+        ## Jobs that fit in the platform.
+        valid_jobs = filter(lambda j: j.res <= nb_hosts, self.simulator.queue)
 
-        # TODO - Add estimated length
-        valid_jobs = [ j for j in self.simulator.queue if j.res <= nb_hosts ]
+        ## Jobs that have all their dependencies fulfilled
+        dependencies = map(lambda x: x.metadata["dependencies"]
+                            if "dependencies" in x.metadata else [], valid_jobs)
+        dep_status = [ sum(j not in self.completed_jobs for j in i) == 0
+                                                        for i in dependencies ]
+        valid_jobs = [ i for i, j in zip(valid_jobs, dep_status) if j == True ]
 
         if len(valid_jobs) > self.queue_max_len:
             valid_jobs = valid_jobs[:self.queue_max_len]
 
+        # 2. Build Queue State
+        jobs = np.zeros((len(valid_jobs), 4))
 
-        for i, job in enumerate(valid_jobs):
-            wall = -1 if job.walltime is None else job.walltime
-            queue["jobs"][i] = [
-                job.subtime,
-                job.res,
-                wall
-            ]
+        # Job subtime
+        jobs[0,:] = [ j.subtime for j in valid_jobs ]
+        # Job resources
+        jobs[1,:] = [ j.res     for j in valid_jobs ]
+        # Job wall
+        jobs[2,:] = [ -1 if j.walltime is None else j.walltime
+                                for j in valid_jobs ]
+        # Job flops
+        jobs[1,:] = [ j.profile.cpu if hasattr(j.profile, "cpu") else -1
+                                for j in valid_jobs ]
+        queue = { "size": len(self.simulator.queue), "jobs": jobs }
 
-        # Platform
-        platform = {
-            "nb_hosts": nb_hosts,
-            "status": np.array(
-                [h.state.value for h in self.simulator.platform.hosts ]),
-            "agenda": np.zeros( (nb_hosts, 2) )
-        }
+        # 3. Build Platform State
+        hosts = np.zeros((nb_hosts, 3))
+        # TODO - Revisar forma en que se estan mandando estos valores
+        #        (ej. Mandar speed relativa a la más lenta o algo asi)
 
-        for i in self.simulator.jobs:
-            if not i.is_running:
-                continue
+        # Host status
+        hosts[:,0] = [ h.state.value for h in self.simulator.platform.hosts ]
+        # Host speed
+        hosts[:,1] = [ self.host_speeds[h.name]
+                                     for h in self.simulator.platform.hosts ]
+        # Host energy
+        hosts[:,2] = [ h.get_pstate_by_type(batsim_py.resources.PowerStateType.COMPUTATION)[0].watt_full
+                                     for h in self.simulator.platform.hosts ]
 
-            if i.allocation == None:
-                continue
-
-            for h_id in i.allocation:
-                platform["agenda"][h_id] = [
-                    i.start_time,
-                    i.walltime or -1
-                ]
+        platform = { "nb_hosts": nb_hosts, "hosts": hosts }
 
         state = {
             "queue": queue,
