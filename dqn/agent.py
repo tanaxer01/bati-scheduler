@@ -1,6 +1,7 @@
 
 import math
 import random
+import numpy as np
 from itertools import count
 from sys import platform
 
@@ -55,29 +56,39 @@ class Agent():
         self.steps_done += 1
 
         # No jobs to assign
-        if sum(obs[:,0]) == 0:
-            return 0
+        if obs.shape[0] == 0:
+            print("| 1 -->", 0)
+            return torch.tensor([0],
+                                device=device, dtype=torch.float32).unsqueeze(0)
 
-        if random.random() <= eps_threshold:
+        if random.random() <= eps_threshold and 1 != 1:
             # TODO - Exploration
-            print(res := random.randint(1,obs.shape[0] + 1))
+            res = torch.tensor([random.randint(1,obs.shape[0] + 1)],
+                                device=device, dtype=torch.float32).unsqueeze(0)
+            print("| 2 -->", res)
             return res
 
         # TODO - DQN -> ConvDQN
+
         # TODO - Explotation
-        scores = self._predict_scores(obs)
+        action = self._predict_scores(obs)
+        print("| 3 -->")
 
-
-
-        return 0
+        return torch.tensor([action],
+                                device=device, dtype=torch.float32).unsqueeze(0)
 
 
     def _predict_scores(self, states):
-        return []
+        with torch.no_grad():
+            scores, _ = self.policy_net(states).max(1)
+            max_job   = scores.argmax()
+
+        return max_job
 
 
     def optimize_model(self):
         if len(self.memory) < BATCH_SIZE:
+            print(f"| nono {len(self.memory)}")
             return
 
         transitions = self.memory.sample(BATCH_SIZE)
@@ -96,19 +107,31 @@ class Agent():
         #                                            if s is not None])
 
         # TODO - Non final ???
-        next_state_batch = torch.cat(batch.next_state)
+        next_state_batch = batch.next_state
 
-        state_batch = torch.cat(batch.state)
+        #state_batch = torch.cat(batch.state)
+        state_batch  = batch.state
         action_batch = torch.cat(batch.action)
         reward_batch = torch.cat(batch.reward)
-
 
         # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
         # columns of actions taken. These are the actions which would've been taken
         # for each batch state according to policy_net
 
         # TODO - FIX
-        state_action_values = self.policy_net(state_batch).gather(1, action_batch)
+        #state_action_values = self.policy_net(state_batch).gather(1, action_batch)
+        print("???????????????????????")
+
+        state_action_values = [ self.policy_net(i).max(1).values for i in state_batch ]
+        print("???", state_action_values[0])
+        state_action_values = torch.concat(state_action_values)
+
+        state_action_values = torch.concat([ self.policy_net(i).max(1)
+                                            for i in state_batch ]).gather(1, action_batch)
+
+
+
+        # ----------
 
 
         # Compute V(s_{t+1}) for all next states.
@@ -120,7 +143,7 @@ class Agent():
         with torch.no_grad():
             # TODO - FIX
             # next_state_values[non_final_mask] = target_net(non_final_next_states).max(1)[0]
-            next_state_values = self.target_net(next_state_batch).max(1)[0]
+            next_state_values = self.target_net(next_state_batch).max(1)
 
         # Compute the expected Q values
         expected_state_action_values = (next_state_values * GAMMA) + reward_batch
@@ -146,7 +169,7 @@ class Agent():
             state = self._process_obs(env.reset())
 
             for t in count():
-                print(f"-> {env.simulator.current_time} {t}")
+                print(f"|--------{env.simulator.current_time} {t} {state.shape[0]}")
                 action = self.act(state)
                 obs, reward, done, _ = env.step(action.item())
                 reward = torch.tensor([reward], device=device)
@@ -179,8 +202,8 @@ class Agent():
                     # self.plot_durations()
                     break
 
-                print("REMOVE RETURN")
-                return
+            print("REMOVE RETURN")
+            return
 
 
 
@@ -189,27 +212,19 @@ class Agent():
         # plt.ioff()
         # plt.show()
 
+
     def _process_obs(self, obs):
-        platform = obs["platform"]
+        platform = obs["platform"]["hosts"].ravel()
         queue    = obs["queue"]
 
-        res = torch.zeros(queue["jobs"].shape[0], 9)
-        for i, j in enumerate(queue["jobs"]):
-            res[i, 0] = j
-            res[i, 1] = obs["current_time"] - queue["jobs"][j][0]  # Waiting time
-            res[i, 2] = queue["jobs"][j][1] / platform["nb_hosts"] # Res needed
+        res = torch.zeros(queue["jobs"].shape[0], 4 + platform.shape[0] )
+        for i, job in enumerate(queue["jobs"]):
             # TODO - Rev MAX_WALL value
-            res[i, 3] = queue["jobs"][j][2] / MAX_WALL             # Wall
+            res[i, 0] = i
+            res[i, 1] = obs["current_time"] - job[0]         # Waiting time
+            res[i, 2] = job[1] / obs["platform"]["nb_hosts"] # Res needed
+            res[i, 3] = job[2] / MAX_WALL                    # Wall
 
-
-        print(obs)
-        res = torch.zeros(len(queue["jobs"]), 3)
-
-
-
-        res = torch.tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)
         return res
-
-
 
 

@@ -168,6 +168,7 @@ class QueueEnv(GridEnv):
         ## Jobs that fit in the platform.
         valid_jobs = filter(lambda j: j.res <= nb_hosts, self.simulator.queue)
 
+        '''
         ## Jobs that have all their dependencies fulfilled
         dependencies = map(lambda x: x.metadata["dependencies"]
                             if "dependencies" in x.metadata else [], valid_jobs)
@@ -177,35 +178,41 @@ class QueueEnv(GridEnv):
 
         if len(valid_jobs) > self.queue_max_len:
             valid_jobs = valid_jobs[:self.queue_max_len]
+        '''
 
-        # 2. Build Queue State
+        valid_jobs = list(valid_jobs)
         jobs = np.zeros((len(valid_jobs), 4))
 
-        # Job subtime
-        jobs[0,:] = [ j.subtime for j in valid_jobs ]
-        # Job resources
-        jobs[1,:] = [ j.res     for j in valid_jobs ]
-        # Job wall
-        jobs[2,:] = [ -1 if j.walltime is None else j.walltime
-                                for j in valid_jobs ]
-        # Job flops
-        jobs[1,:] = [ j.profile.cpu if hasattr(j.profile, "cpu") else -1
-                                for j in valid_jobs ]
+        if jobs.shape[0] != 0:
+            # Job subtime
+            jobs[:,0] = [ j.subtime for j in valid_jobs ]
+            # Job resources
+            jobs[:,1] = [ j.res     for j in valid_jobs ]
+            # Job wall
+            jobs[:,2] = [ -1 if j.walltime is None else j.walltime
+                                    for j in valid_jobs ]
+            # Job flops
+            jobs[:,3] = [ j.profile.cpu if hasattr(j.profile, "cpu") else -1
+                                    for j in valid_jobs ]
+
+
         queue = { "size": len(self.simulator.queue), "jobs": jobs }
 
         # 3. Build Platform State
         hosts = np.zeros((nb_hosts, 3))
-        # TODO - Revisar forma en que se estan mandando estos valores
-        #        (ej. Mandar speed relativa a la más lenta o algo asi)
 
-        # Host status
-        hosts[:,0] = [ h.state.value for h in self.simulator.platform.hosts ]
-        # Host speed
-        hosts[:,1] = [ self.host_speeds[h.name]
-                                     for h in self.simulator.platform.hosts ]
-        # Host energy
-        hosts[:,2] = [ h.get_pstate_by_type(batsim_py.resources.PowerStateType.COMPUTATION)[0].watt_full
-                                     for h in self.simulator.platform.hosts ]
+        if nb_hosts != 0:
+            # TODO - Revisar forma en que se estan mandando estos valores
+            #        (ej. Mandar speed relativa a la más lenta o algo asi)
+
+            # Host status
+            hosts[:,0] = [ h.state.value for h in self.simulator.platform.hosts ]
+            # Host speed
+            hosts[:,1] = [ self.host_speeds[h.name]
+                                         for h in self.simulator.platform.hosts ]
+            # Host energy
+            hosts[:,2] = [ h.get_pstate_by_type(batsim_py.resources.PowerStateType.COMPUTATION)[0].watt_full
+                                         for h in self.simulator.platform.hosts ]
 
         platform = { "nb_hosts": nb_hosts, "hosts": hosts }
 
@@ -218,6 +225,7 @@ class QueueEnv(GridEnv):
         return state
 
     def _get_spaces(self):
+        # TODO - update dis
         nb_hosts, agenda_shape, status_shape = 0, (), ()
         if self.simulator.is_running:
             nb_hosts = sum(1 for _ in self.simulator.platform.hosts)
