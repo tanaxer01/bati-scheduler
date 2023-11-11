@@ -1,9 +1,8 @@
 
 import math
 import random
-import numpy as np
+import matplotlib.pyplot as plt
 from itertools import count
-from sys import platform
 
 import torch
 import torch.nn as nn
@@ -57,25 +56,47 @@ class Agent():
 
         # No jobs to assign
         if obs.shape[0] == 0:
-            print("| 1 -->", 0)
+            print("| 1 -->", 0, " (", eps_threshold,")")
             return torch.tensor([0],
                                 device=device, dtype=torch.float32).unsqueeze(0)
 
-        if random.random() <= eps_threshold and 1 != 1:
+        if random.random() <= eps_threshold:
             # TODO - Exploration
-            res = torch.tensor([random.randint(1,obs.shape[0] + 1)],
+            res = random.randint(1,obs.shape[0])
+            print(f"| 2 -> {res}/{obs.shape[0]}")
+            return torch.tensor([res],
                                 device=device, dtype=torch.float32).unsqueeze(0)
-            print("| 2 -->", res)
-            return res
 
         # TODO - DQN -> ConvDQN
 
         # TODO - Explotation
         action = self._predict_scores(obs)
-        print("| 3 -->")
-
-        return torch.tensor([action],
+        print(f"| 3 -> {action}/{obs.shape[0]}")
+        return torch.tensor([action - 1],
                                 device=device, dtype=torch.float32).unsqueeze(0)
+
+
+    def plot_durations(self, show_result=False):
+        plt.figure(1)
+        durations_t = torch.tensor(self.episode_durations, dtype=torch.float)
+        if show_result:
+            plt.title("result")
+        else:
+            plt.clf()
+            plt.title("Training...")
+        plt.xlabel("Episode")
+        plt.ylabel("Duration")
+        plt.plot(durations_t.numpy())
+        # Take 100 episode averages and plot them too
+        if len(durations_t) >= 100:
+            means = durations_t.unfold(0, 100, 1).mean(1).view(-1)
+            means = torch.cat((torch.zeros(99), means))
+            plt.plot(means.numpy())
+
+        plt.pause(0.001) # pause a bit so that plots are updated
+
+        if show_result:
+            plt.savefig("/data/expe-out/training.png")
 
 
     def _predict_scores(self, states):
@@ -83,7 +104,7 @@ class Agent():
             scores, _ = self.policy_net(states).max(1)
             max_job   = scores.argmax()
 
-        return max_job
+        return max_job + 1
 
 
     def optimize_model(self):
@@ -120,17 +141,9 @@ class Agent():
 
         # TODO - FIX
         #state_action_values = self.policy_net(state_batch).gather(1, action_batch)
-        print("???????????????????????")
-
-        state_action_values = [ self.policy_net(i).max(1).values for i in state_batch ]
-        print("???", state_action_values[0])
-        state_action_values = torch.concat(state_action_values)
-
-        state_action_values = torch.concat([ self.policy_net(i).max(1)
-                                            for i in state_batch ]).gather(1, action_batch)
-
-
-
+        state_action_values = [ self.policy_net(i).max().unsqueeze(0) for i in state_batch ]
+        state_action_values = torch.concat(state_action_values).unsqueeze(1)
+        state_action_values = state_action_values.gather(0, action_batch.type(torch.int64))
         # ----------
 
 
@@ -143,7 +156,9 @@ class Agent():
         with torch.no_grad():
             # TODO - FIX
             # next_state_values[non_final_mask] = target_net(non_final_next_states).max(1)[0]
-            next_state_values = self.target_net(next_state_batch).max(1)
+            next_state_values = [ self.policy_net(i).max().unsqueeze(0) for i in state_batch ]
+            next_state_values = torch.concat(next_state_values)
+            # ----------
 
         # Compute the expected Q values
         expected_state_action_values = (next_state_values * GAMMA) + reward_batch
@@ -162,7 +177,8 @@ class Agent():
 
 
     def train(self, env):
-        num_episodes = NUM_EPISODES if torch.cuda.is_available() else 1
+        #num_episodes = NUM_EPISODES if torch.cuda.is_available() else 1
+        num_episodes = 1
 
         for i_episode in range(num_episodes):
             # Initialize the environment and get it's state
@@ -199,18 +215,33 @@ class Agent():
 
                 if done:
                     self.episode_durations.append(t + 1)
-                    # self.plot_durations()
+                    self.plot_durations()
                     break
 
-            print("REMOVE RETURN")
-            return
-
-
-
         print("[Training Complete]")
-        # self.plot_durations(show_result=True)
+        self.plot_durations(show_result=True)
         # plt.ioff()
-        # plt.show()
+        plt.show()
+
+        torch.save(self.policy_net.state_dict(), "/data/expe-out/policy_weights.pth")
+        torch.save(self.target_net.state_dict(), "/data/expe-out/target_weights.pth")
+
+
+    def play(self, env, verbose=True):
+        history = { "score": 0, "steps": 0, "info": None }
+        obs, done, info = env.reset(), False, {}
+        obs = self._process_obs(obs)
+
+        while not done:
+            obs, reward, done, info = env.step( self.act(obs) )
+            obs = self._process_obs(obs)
+
+            history['score'] += reward
+            history['steps'] += 1
+            history['info']   = info
+
+        if verbose:
+            print(f"[DONE] Score: {history['score']} - Steps: {history['steps']}")
 
 
     def _process_obs(self, obs):

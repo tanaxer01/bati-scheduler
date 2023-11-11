@@ -21,7 +21,7 @@ class DQN(nn.Module):
 
 class ConvDQN(nn.Module):
 
-    def __init__(self, n_observations, n_actions=1):
+    def __init__(self, n_observations, n_actions=20):
         super(ConvDQN, self).__init__()
         self.layer1 = nn.Conv2d(1, n_observations, 64)
         self.layer2 = nn.Linear(64, 64)

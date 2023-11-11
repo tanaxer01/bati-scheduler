@@ -98,7 +98,10 @@ class QueueEnv(GridEnv):
 
     def step(self, action) -> Tuple[Any, float, bool, dict]:
         assert self.simulator.is_running and self.simulator.platform
-        assert 0 <= action <= self.queue_max_len , f"Invalid aciton {action}."
+
+        if 0 > action > self.queue_max_len:
+            raise error.InvalidAction(f"Invalid Action: {action}/{self.queue_max_len}")
+
 
         # action > 0 -> place in list
         scheduled, reward = False, 0.
