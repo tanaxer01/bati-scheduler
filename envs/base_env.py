@@ -97,16 +97,16 @@ class QueueEnv(GridEnv):
         self.running_jobs.pop(job.id)
 
     def step(self, action) -> Tuple[Any, float, bool, dict]:
-        assert self.simulator.is_running and self.simulator.platform
+        assert self.simulator.is_running and self.simulator.platform, f"Simulation not running."
+        #assert 0 <= action <= self.queue_max_len, f"Invalid Action: {action}, max action: {len(self.simulator.queue)}."
 
-        if 0 > action > self.queue_max_len:
-            raise error.InvalidAction(f"Invalid Action: {action}/{self.queue_max_len}")
-
-
-        # action > 0 -> place in list
         scheduled, reward = False, 0.
         if action > 0:
-            job = self.simulator.queue[int(action)-1]
+            ## Get valid jobs
+            nb_hosts = sum( 1 for _ in self.simulator.platform.hosts)
+            posibles = [ j for j in self.simulator.queue if j.res <= nb_hosts ]
+
+            job = posibles[int(action)-1]
 
             available = self.simulator.platform.get_not_allocated_hosts()
             if job.res <= len(available):
@@ -119,38 +119,18 @@ class QueueEnv(GridEnv):
             reward = self._get_reward()
             self.simulator.proceed_time(self.t_action)
 
+
         obs = self._get_state()
         done = not self.simulator.is_running
         info = {"workload": self.workload}
         return (obs, reward, done, info)
 
-    '''
-    def _get_job_obj(self, id) -> Job:
-        jobs = [ i for i in self.simulator.jobs if i.id == id ]
-        #assert len(jobs) == 1, "If job is in self.running_jobs it can't be None"
-
-        if len(jobs):
-            return jobs[0]
-    '''
 
     def _get_reward(self) -> float:
 
         # 1. Get running jobs
-        jobs = filter(lambda x: x.id in self.running_jobs, self.simulator.jobs)
-
-        # TODO - Why did I filter by dependencies xd.
-        '''
-        # Computing jobs
-        jobs = list(filter(lambda x: hasattr(x.profile, "cpu"), jobs))
-
-        # Check dependencies
-        dependencies = map(lambda x: x.metadata["dependencies"]
-                                if "dependencies" in x.metadata else [], jobs)
-        deps_status  = [ sum(j not in self.completed_jobs for j in i) == 0
-                                                        for i in dependencies ]
-
-        jobs = [ i for i, j in zip(jobs, deps_status) if j == True ]
-        '''
+        #jobs = filter(lambda x: x.id in self.running_jobs, self.simulator.jobs)
+        jobs = [ j for j in self.simulator.jobs if j.is_running ]
 
         # 2. Calculating reward
         job_slowest_res = [ min(map(lambda x: self.host_speeds[x], i))
@@ -159,49 +139,45 @@ class QueueEnv(GridEnv):
         expected_turnaround = [ i.profile.cpu / j for i,j in zip(jobs, job_slowest_res) ]
         waiting_time = [ i.waiting_time if i.waiting_time != None else 0 for i in jobs ]
 
-        r = [ 1 / np.log(i + j) for i, j in zip(expected_turnaround, waiting_time) ]
+        # frac log
+        #r = [ i + j for i, j in zip(expected_turnaround, waiting_time) ]
+        #return -1*(sum(r)**2) if len(r) != 0 else 0.0
 
+        return (-1 * sum(waiting_time)/len(waiting_time)) if len(waiting_time) != 0. else 0.
 
-        return sum(r)
 
     def _get_state(self) -> Any:
         nb_hosts = sum( 1 for _ in self.simulator.platform.hosts)
 
-        # 1. Get ready to schedule jobs.
-        ## Jobs that fit in the platform.
-        valid_jobs = filter(lambda j: j.res <= nb_hosts, self.simulator.queue)
+        # 1. Only jobs that fit.
+        posibles = [ j for j in self.simulator.queue if j.res <= nb_hosts ]
 
         '''
-        ## Jobs that have all their dependencies fulfilled
-        dependencies = map(lambda x: x.metadata["dependencies"]
-                            if "dependencies" in x.metadata else [], valid_jobs)
-        dep_status = [ sum(j not in self.completed_jobs for j in i) == 0
-                                                        for i in dependencies ]
-        valid_jobs = [ i for i, j in zip(valid_jobs, dep_status) if j == True ]
-
-        if len(valid_jobs) > self.queue_max_len:
-            valid_jobs = valid_jobs[:self.queue_max_len]
+        # 2. Only jobs whose deendencies are finished.
+        deps = [ x.metadata["dependencies"] if "dependencies" in x.metadata
+                                                    else [] for x in posibles ]
+        deps_status = [ sum(j not in self.completed_jobs for j in i) == 0
+                                                                for i in deps ]
+        valid = [ i for i, j in zip(posibles, deps_status) if j == True ]
         '''
+        valid = posibles
 
-        valid_jobs = list(valid_jobs)
-        jobs = np.zeros((len(valid_jobs), 4))
-
+        ## Queue status
+        jobs = np.zeros((len(valid), 4))
         if jobs.shape[0] != 0:
             # Job subtime
-            jobs[:,0] = [ j.subtime for j in valid_jobs ]
+            jobs[:,0] = [ j.subtime for j in valid ]
             # Job resources
-            jobs[:,1] = [ j.res     for j in valid_jobs ]
+            jobs[:,1] = [ j.res     for j in valid ]
             # Job wall
-            jobs[:,2] = [ -1 if j.walltime is None else j.walltime
-                                    for j in valid_jobs ]
+            jobs[:,2] = [ -1 if j.walltime is None else j.walltime for j in valid ]
             # Job flops
             jobs[:,3] = [ j.profile.cpu if hasattr(j.profile, "cpu") else -1
-                                    for j in valid_jobs ]
-
+                                                                for j in valid ]
 
         queue = { "size": len(self.simulator.queue), "jobs": jobs }
 
-        # 3. Build Platform State
+        ## Build Platform State
         hosts = np.zeros((nb_hosts, 3))
 
         if nb_hosts != 0:
@@ -217,6 +193,9 @@ class QueueEnv(GridEnv):
             hosts[:,2] = [ h.get_pstate_by_type(batsim_py.resources.PowerStateType.COMPUTATION)[0].watt_full
                                          for h in self.simulator.platform.hosts ]
 
+        sorted_idxs = np.argsort(hosts[:,1])
+        hosts = hosts[sorted_idxs]
+
         platform = { "nb_hosts": nb_hosts, "hosts": hosts }
 
         state = {
@@ -226,6 +205,7 @@ class QueueEnv(GridEnv):
         }
 
         return state
+
 
     def _get_spaces(self):
         # TODO - update dis

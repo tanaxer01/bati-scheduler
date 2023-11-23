@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.quantized import Conv2d
 
 class DQN(nn.Module):
 
@@ -19,7 +20,9 @@ class DQN(nn.Module):
         x = F.relu(self.layer3(x))
         return self.layer4(x)
 
+
 class TestConvDQN(nn.Module):
+
     def __init__(self, n_observations, n_actions=20):
         super(TestConvDQN, self).__init__()
         self.layer1 = nn.Conv2d(2, 3, kernel_size=1)

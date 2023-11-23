@@ -173,7 +173,7 @@ class Agent():
             logger = MetricLogger(save_dir)
 
         #episodes = 40
-        episodes = 1
+        episodes = 5
         for e in range(episodes):
             state, _ = env.reset()
             state = self._process_obs(state)
@@ -245,12 +245,12 @@ class Agent():
             ## Queue length
             # state[i, 4] = candidates.size
             ## Mean Waiting time
-            state[i, 5] = candidates[:,0].max() if candidates.shape[0] != 0 else 0.
+            state[i, 5] = candidates[:,0].mean() if candidates.shape[0] != 0 else 0.
             ## Mean Resources needed
             #state[i, 4] = len(candidates)/ platform["nb_hosts"]
-            state[i, 6] = candidates[:,1].max() / platform["nb_hosts"] if candidates.shape[0] != 0 else 0.
+            state[i, 6] = candidates[:,1].mean() / platform["nb_hosts"] if candidates.shape[0] != 0 else 0.
             ## Mean Walltime
             #state[i, 7] = candidates[:,2].mean() / platform["hosts"][:,1].mean() if candidates.shape[0] != 0 else 0.
-            state[i, 7] = candidates[:,2].max() if candidates.shape[0] != 0 else 0.
+            state[i, 7] = candidates[:,2].mean() if candidates.shape[0] != 0 else 0.
 
         return state

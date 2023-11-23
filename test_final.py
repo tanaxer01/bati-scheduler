@@ -33,7 +33,7 @@ agent = Agent(state_size)
 # agent = FCFSAgent()
 
 #agent.train(env)
-agent.play(env)
+agent.play(env, True)
 
 jobs_df.to_csv("/data/expe-out/jobs-DQN.out")
 sim_df.to_csv("/data/expe-out/sim-DQN.out")

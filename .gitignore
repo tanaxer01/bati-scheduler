@@ -1,6 +1,5 @@
 .ipynb_checkpoints
 __pycache__
-expe-out
 platforms/heterogeneous
 platforms/*.xml
 workloads
