@@ -21,9 +21,9 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 RUN pip install git+https://github.com/tanaxer01/batsim-py \
                 git+https://github.com/tanaxer01/GridGym   \
-                torch gymnasium stable-baselines3
+                torch gymnasium matplotlib
 
-FROM python:3.10-slim
+FROM python:3.10
 
 COPY --from=builder /output/store /nix/store
 COPY --from=builder /output/profile /usr/.local

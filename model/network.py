@@ -19,19 +19,16 @@ class DQN(nn.Module):
 
 
 if __name__ == "__main__":
-    import gym
-    env = gym.make("CartPole-v1")
+    n_observations = 8
+    n_actions = 1
 
-    # Get number of actions from gym action space
-    n_actions = env.action_space.n
-    # Get the number of state observations
-    state = env.reset()
-    n_observations = len(state)
+    print("Using cuda:", torch.cuda.is_available())
+    print("==================================================")
 
     A = DQN(n_observations, n_actions)
     B = DQN(n_observations+1, 1)
 
-    inp  = torch.randn(1, 4)
+    inp  = torch.randn(1, n_observations)
     inp2 = inp.expand(2, -1)
     idxs = torch.arange(inp2.size(0)).unsqueeze(1)
     inp2 = torch.cat((inp2, idxs), dim=1)
@@ -52,6 +49,7 @@ if __name__ == "__main__":
     print(maxi2.shape, maxi2)
     print("==================================================")
     print("==================================================")
+    '''
     batch = torch.stack([ inp for i in range(3) ], dim=0)
 
     print(batch.shape, batch)
@@ -63,4 +61,5 @@ if __name__ == "__main__":
     batch_max = batch_out.max(2).indices
 
     print(batch_max.shape, batch_max)
+    '''
 
