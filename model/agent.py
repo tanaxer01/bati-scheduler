@@ -172,7 +172,7 @@ class Agent():
             logger = MetricLogger(save_dir)
 
         #episodes = 40
-        episodes = 10
+        episodes = 40
         for e in range(episodes):
             state, _ = env.reset()
             state = self._process_obs(state)
