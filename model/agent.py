@@ -38,8 +38,13 @@ class Agent():
         # Q Network
         self.policy_net = DQN(state_size, 1)
         self.target_net = DQN(state_size, 1)
+        self.target_net.load_state_dict(self.policy_net.state_dict())
+
+        for p in self.target_net.parameters():
+            p.requires_grad = False
 
         self.optimizer = optim.Adam(self.policy_net.parameters(), lr=LR)
+        self.loss_fn = nn.SmoothL1Loss()
 
         # Replay Memory
         self.memory = ReplayMemory(20000)
@@ -61,6 +66,27 @@ class Agent():
         # increment step
         self.steps_done += 1
         return action_idx
+
+    def _update_online_Q(self, td_estimate, td_target):
+        """ Calculates the loss in the actual step, and updates the weights accordingly"""
+        # Compute the Huber Loss
+        loss = self.loss_fn(td_estimate, td_target)
+        # Optimize the model
+        self.optimizer.zero_grad()
+        loss.backward()
+         # In-place gradient clipping
+        torch.nn.utils.clip_grad_value_(self.policy_net.parameters(), 100)
+        self.optimizer.step()
+
+        return loss.item()
+
+    def _sync_Q_target(self):
+        """ Syncronize the weights of the target_net with the ones from the online_net. """
+        target_net_state_dict = self.target_net.state_dict()
+        policy_net_state_dict = self.policy_net.state_dict()
+        for key in policy_net_state_dict:
+            target_net_state_dict[key] = policy_net_state_dict[key]*TAU + target_net_state_dict[key]*(1-TAU)
+        self.target_net.load_state_dict(target_net_state_dict)
 
     def optimize_model(self):
         if len(self.memory) < BATCH_SIZE:
@@ -104,6 +130,7 @@ class Agent():
         # Compute the expected Q values
         expected_state_action_values = (next_state_values * GAMMA) + reward_batch
 
+        '''
         # Compute Huber loss
         criterion = nn.SmoothL1Loss()
         loss = criterion(state_action_values.T, expected_state_action_values.unsqueeze(1))
@@ -115,8 +142,22 @@ class Agent():
          # In-place gradient clipping
         torch.nn.utils.clip_grad_value_(self.policy_net.parameters(), 100)
         self.optimizer.step()
+        '''
+        loss = self._update_online_Q(state_action_values.T, expected_state_action_values.unsqueeze(1))
 
-        return (loss.item(), expected_state_action_values.mean().item())
+        return (loss, expected_state_action_values.mean().item())
+
+    def save(self):
+        save_path = Path("/data/expe-out/network.chkpt/netwrk")
+        eps = EPS_END + (EPS_START - EPS_END) * math.exp(-1. * self.steps_done / EPS_DECAY)
+        torch.save( dict(model=self.policy_net.state_dict(), exploration_rate = eps), save_path)
+        print(f"Saved network checkpoing to {save_path} at step{self.steps_done}")
+
+    def load(self, checkpoint_fn):
+        checkpoint = torch.load(checkpoint_fn)
+
+        self.policy_net.load_state_dict(checkpoint["model"])
+        self.target_net.load_state_dict(checkpoint["model"])
 
     def train(self, env):
         #num_episodes = NUM_EPISODES if torch.cuda.is_available() else 1
@@ -172,15 +213,13 @@ class Agent():
             logger = MetricLogger(save_dir)
 
         #episodes = 40
-        episodes = 40
+        episodes = 10
         for e in range(episodes):
             state, _ = env.reset()
             state = self._process_obs(state)
 
             # Play the game!
             while True:
-                assert state.size(0) != 0, f"+ {len(env.simulator.queue)} {state.shape}"
-
                 # Run agent on the state
                 action = self.act(state)
 
@@ -200,6 +239,10 @@ class Agent():
                 # Learn
                 loss, q = self.optimize_model()
 
+                # Soft update of the target network's weights
+                # θ′ ← τ θ + (1 −τ )θ′
+                self._sync_Q_target()
+
                 # Logging
                 if save and logger:
                     logger.log_step(reward.item(), loss, q)
@@ -217,6 +260,26 @@ class Agent():
                 #if (e % 20 == 0) or (e == episodes - 1):
                 eps = EPS_END + (EPS_START - EPS_END) * math.exp(-1. * self.steps_done / EPS_DECAY)
                 logger.record(episode=e, epsilon=eps, step=self.steps_done)
+
+        if save:
+            self.save()
+
+    def test(self, env):
+        history = { "score": 0, "steps": 0, "info": None }
+        done, info = False, {}
+        state, _ = env.reset()
+        state = self._process_obs(state)
+
+        # Play the game!
+        while not done:
+            state, reward, done, _, info = env.step( self.act(state) )
+            state = self._process_obs(state)
+
+            history['score'] += reward
+            history['steps'] += 1
+            history['info']   = info
+
+        print(f"[DONE] Score: {history['score']} - Steps: {history['steps']}")
 
     def _process_obs(self, obs):
         queue = obs["queue"]
@@ -253,3 +316,4 @@ class Agent():
             state[i, 7] = candidates[:,2].mean() if candidates.shape[0] != 0 else 0.
 
         return state
+

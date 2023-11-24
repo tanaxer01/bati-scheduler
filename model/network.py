@@ -16,6 +16,39 @@ class DQN(nn.Module):
         x = F.relu(self.layer3(x))
         return self.layer4(x).T
 
+class DDQN(nn.Module):
+    def __init__(self, n_observations:  int, n_actions: int) -> None:
+        super().__init__()
+
+        self.online = self._build_fcn(n_observations, n_actions)
+        self.target = self._build_fcn(n_observations, n_actions)
+        self.target.load_state_dict(self.online.state_dict())
+
+        for p in self.target.parameters():
+            p.requires_grad = False
+
+    def forward(self, input, model):
+        match model:
+            case "online":
+                return self.online(input)
+            case "target":
+                return self.target(input)
+
+    def _build_fcn(self, obs, acts):
+        return nn.Sequential(
+            # Layer 1
+            nn.Linear(obs, 64),
+            nn.ReLU(),
+            # Layer 2
+            nn.Linear(64, 64),
+            nn.ReLU(),
+            # Layer 3
+            nn.Linear(64, 32),
+            nn.ReLU(),
+            # Layer 4
+            nn.Linear(32, acts)
+        )
+
 
 
 if __name__ == "__main__":
