@@ -20,13 +20,10 @@ class SkipTime(gym.Wrapper):
 
         start_t = envv.simulator.current_time
         while envv.simulator.is_running:
-            available_hosts = envv.simulator.platform.get_not_allocated_hosts()
-            posible_jobs = [ j for j in envv.simulator.queue if j.res <= len(available_hosts) ]
-
-            if len(posible_jobs) > 0:
+            valid_jobs = list( envv._get_posible_jobs() )
+            if len(valid_jobs) > 0:
                 break
             print(".",end="")
-
             envv.simulator.proceed_time(envv.t_action)
         end_t = envv.simulator.current_time
 
@@ -59,6 +56,7 @@ class SimpleEnv(gym.Env):
     metadata = { "render.modes": [] }
 
 ###############################################################################
+
 # Base Functions
 ###############################################################################
 
@@ -67,6 +65,7 @@ class SimpleEnv(gym.Env):
                  workload_fn: str,
                  t_action: int = 1,
                  t_shutdown: int = 0,
+                 track_dependencies: bool = False,
                  seed: Optional[int] = None,
                  simulation_time: Optional[float] = None,
                  verbosity: batsim_py.simulator.BatsimVerbosity = 'quiet') -> None:
@@ -97,10 +96,12 @@ class SimpleEnv(gym.Env):
         self.simulator = batsim_py.SimulatorHandler()
         self.verbosity: batsim_py.simulator.BatsimVerbosity = verbosity
         self.observation_space, self.action_space = self._get_spaces()
-        self.workload: Optional[str] = None
         ##
-        self.t_action = t_action
         self.simulation_time = simulation_time
+
+        self.t_action = t_action
+        self.track_dependencies = track_dependencies
+        ##
         self.host_speeds = self._get_host_speeds()
 
     def reset(self, seed=None, options=None):
@@ -124,8 +125,17 @@ class SimpleEnv(gym.Env):
         self.simulator.close()
 
     def _start_simulator(self) -> None:
+        if os.path.isdir(self.workload_fn):
+            workloads = os.listdir(self.workload_fn)
+            workloads = [ os.path.join(self.workload_fn, w) for w in workloads if w.endswith('.json') and "dependencies" not in w ]
+
+            workload = self.np_random.choice(workloads)
+        else:
+            workload = self.workload_fn
+
+
         self.simulator.start(platform=self.platform_fn,
-                             workload=self.workload_fn,
+                             workload=workload,
                              verbosity=self.verbosity,
                              simulation_time=self.simulation_time)
 
@@ -154,8 +164,21 @@ class SimpleEnv(gym.Env):
 
         obs = self._get_state()
         done = not self.simulator.is_running
-        info = { "workload": self.workload }
+        info = { "workload": self.workload_fn }
         return (obs, reward, done, False, info)
+
+    def _get_posible_jobs(self):
+        # 1. Check if job can be allocated.
+        nb_avail = sum( 1 for _ in self.simulator.platform.get_not_allocated_hosts() )
+        resources_met    = lambda x: x.res <= nb_avail
+
+        # 2. Check if jobs dependencies are met.
+        not_finished_jobs = [ int(j.name) for j in self.simulator.jobs ]
+        dependencies_met = lambda x: all( i not in not_finished_jobs for i in x.metadata["dependencies"]) if "dependencies" in x.metadata else True
+
+        valid_jobs = filter(lambda x: resources_met(x), self.simulator.queue)
+        valid_jobs = filter(lambda x: resources_met(x) and (dependencies_met(x) or not self.track_dependencies), self.simulator.queue)
+        return valid_jobs
 
     def _get_host_speeds(self):
         """ Reads the compputing seeds of each host, and stores them in Kflops """
@@ -173,48 +196,53 @@ class SimpleEnv(gym.Env):
     def _get_reward(self) -> float:
         score = 0.
 
-        queue = [ j for j in self.simulator.queue ]
+        valid_jobs = list( self._get_posible_jobs() )
 
-        if len(queue) != 0:
-            score -= 10 * sum([ (self.simulator.current_time - j.subtime)/j.walltime for j in queue ])/len(queue)
+        # Delay
+        delayed = sum( int((self.simulator.current_time - j.subtime) > 10) for j in valid_jobs )
 
-        nb_hosts = sum( 1 for _ in self.simulator.platform.get_not_allocated_hosts() )
+        # Dependencies
+
+        if len(valid_jobs) != 0:
+            score += sum([ (self.simulator.current_time - j.subtime) < 10 for j in valid_jobs ])
 
         total = 0
         if len(self.simulator.queue):
             total = sum([ j.walltime * j.res for j in self.simulator.queue ]) / len(self.simulator.queue)
 
-        return -1 * total
+        return score - total
 
     def _get_state(self):
         nb_hosts = sum( 1 for _ in self.simulator.platform.hosts )
         nb_avail = sum( 1 for _ in self.simulator.platform.get_not_allocated_hosts() )
 
-        posible_jobs = [ j for j in self.simulator.queue if j.res <= nb_avail ]
+        # posible_jobs = [ j for j in self.simulator.queue if j.res <= nb_avail ]
+        valid_jobs = list( self._get_posible_jobs() )
+
         # Queue status
-        jobs = np.zeros( (len(posible_jobs), 4) )
-        if len(posible_jobs) != 0:
+        jobs = np.zeros( (len(valid_jobs), 5) )
+        if len(valid_jobs) != 0:
         ## Subtime
-            jobs[:,0] = [ j.subtime for j in posible_jobs ]
+            jobs[:,0] = [ j.subtime for j in valid_jobs ]
         ## Resources
-            jobs[:,1] = [ j.res     for j in posible_jobs ]
+            jobs[:,1] = [ j.res     for j in valid_jobs ]
             #jobs[:,1] /= len(available_hosts)
         ## Walltime
-            jobs[:,2] = [ j.walltime if j.walltime else -1 for j in posible_jobs ]
+            jobs[:,2] = [ j.walltime if j.walltime else -1 for j in valid_jobs ]
             #jobs[:,2] /= jobs[:,2].max()
         ## Flops
-            jobs[:,3] = [ j.profile.cpu for j in posible_jobs ]
+            jobs[:,3] = [ j.profile.cpu or 0 for j in valid_jobs ]
+        ## Dependencies
+            jobs[:,4] = [ len(j.metadata["dependencies"]) if "dependencies" in j.metadata else 0 for j in valid_jobs ]
 
-        queue = { "size": len(posible_jobs), "jobs": jobs }
+        queue = { "size": len(valid_jobs), "jobs": jobs }
 
         # Platform status
         hosts = np.zeros( (nb_hosts, 2) )
-
         ## Status (0 - sleep, ..., 3 - computation)
         hosts[:,0] = [ not h.is_allocated for h in self.simulator.platform.hosts ]
         ## Speed (Kflops)
         hosts[:,1] = [ self.host_speeds[h.name] for h in self.simulator.platform.hosts ]
-
 
         ## Energy consumption
         #hosts[:,2] = [  for h in self.simulator.platform.hosts ]
