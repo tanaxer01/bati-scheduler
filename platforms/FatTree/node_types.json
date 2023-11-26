@@ -21,7 +21,27 @@
         ]
     },
     "node_C": {
-        "attributes": { "speed": "1.0Mf, 0.0f, 1.01f, 0.334f", "pstate": "0" },
+        "attributes": { "speed": "98.095Mf, 0.0f, 1.01f, 0.334f", "pstate": "0" },
+        "properties": [
+            { "id": "sleep_pstates", "value": "1:3:2"},
+            { "id": "wattage_per_state", "value": "95.0:190.0,9:9,125.0:125.0,101.0:101.0" },
+            { "id": "wattage_off", "value": "9" },
+            { "id": "watt_per_state", "value": "95.0:190.0,9:9,125.0:125.0,101.0:101.0" },
+            { "id": "watt_off", "value": "9" }
+        ]
+    },
+    "node_D": {
+        "attributes": { "speed": "49.047Mf, 0.0f, 1.01f, 0.334f", "pstate": "0" },
+        "properties": [
+            { "id": "sleep_pstates", "value": "1:3:2"},
+            { "id": "wattage_per_state", "value": "95.0:190.0,9:9,125.0:125.0,101.0:101.0" },
+            { "id": "wattage_off", "value": "9" },
+            { "id": "watt_per_state", "value": "95.0:190.0,9:9,125.0:125.0,101.0:101.0" },
+            { "id": "watt_off", "value": "9" }
+        ]
+    },
+    "node_E": {
+        "attributes": { "speed": "24.523Mf, 0.0f, 1.01f, 0.334f", "pstate": "0" },
         "properties": [
             { "id": "sleep_pstates", "value": "1:3:2"},
             { "id": "wattage_per_state", "value": "95.0:190.0,9:9,125.0:125.0,101.0:101.0" },
@@ -30,4 +50,6 @@
             { "id": "watt_off", "value": "9" }
         ]
     }
+    
+    
 }

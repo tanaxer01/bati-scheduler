@@ -1,7 +1,8 @@
 import numpy as np
 import time, datetime
+from pathlib import Path
 import matplotlib.pyplot as plt
-
+from batsim_py.monitors import Monitor
 
 class MetricLogger:
     def __init__(self, save_dir):
@@ -104,4 +105,34 @@ class MetricLogger:
             plt.plot(getattr(self, f"moving_avg_{metric}"), label=f"moving_avg_{metric}")
             plt.legend()
             plt.savefig(getattr(self, f"{metric}_plot"))
+
+
+class MonitorsInterface:
+    def __init__(self, name: str, save_dir: str, monitors_fns: list[type] ):
+        self.save_dir = Path(save_dir)
+        self.name = name
+
+        self.monitors_fns = monitors_fns
+        self.monitors : list[Monitor]= []
+
+        for i in self.monitors_fns:
+            print(i)
+
+    def init_episode(self, simulator, is_final_ep=False):
+        if not is_final_ep:
+            return
+
+        for fn in self.monitors_fns:
+            self.monitors.append( fn(simulator) )
+
+    def record(self):
+        print(self.monitors)
+        if len(self.monitors) == 0:
+            return
+
+        for fn, monitor in zip(self.monitors_fns, self.monitors):
+            prefix = str(fn).split(".")[-1][:-2]
+            save_log = self.save_dir / f'{prefix}-{self.name}.out'
+            print(f"Generating file {save_log}")
+            monitor.to_csv(str(save_log))
 

@@ -1,18 +1,19 @@
-from typing import Any, List, Optional, Sequence, Tuple
+from typing import Any, Optional, Tuple
 import xml.etree.ElementTree as ET
 import numpy as np
 import batsim_py
-import os
 
 import gymnasium as gym
 from gymnasium import error, spaces
-from gymnasium.utils import seeding
+
+from .base_env import SchedulingEnv
 
 INF = float('inf')
 
 class SkipTime(gym.Wrapper):
+    """Wrapper that advances the simulation time until there is a valid state to process"""
+
     def __init__(self, env):
-        """Return only every `skip`-th frame"""
         super().__init__(env)
 
     def _advance_time(self):
@@ -21,12 +22,15 @@ class SkipTime(gym.Wrapper):
         start_t = envv.simulator.current_time
         while envv.simulator.is_running:
             valid_jobs = list( envv._get_posible_jobs() )
+
             if len(valid_jobs) > 0:
                 break
-            print(".",end="")
-            envv.simulator.proceed_time(envv.t_action)
-        end_t = envv.simulator.current_time
+            else:
+                print(".",end="")
 
+            envv.simulator.proceed_time(envv.t_action)
+
+        end_t = envv.simulator.current_time
         if start_t != end_t:
             print("\n<< Start assignation >>")
 
@@ -50,98 +54,30 @@ class SkipTime(gym.Wrapper):
         done = not self.env.unwrapped.simulator.is_running
         return obs, reward, done, trunc, info
 
-class SimpleEnv(gym.Env):
-    """Basic Environment"""
-
-    metadata = { "render.modes": [] }
-
-###############################################################################
-
-# Base Functions
-###############################################################################
+class SimpleEnv(SchedulingEnv):
+    """Simple scheduling environment that can enforce dependencies between tasks"""
 
     def __init__(self,
                  platform_fn: str,
                  workload_fn: str,
                  t_action: int = 1,
-                 t_shutdown: int = 0,
-                 track_dependencies: bool = False,
                  seed: Optional[int] = None,
                  simulation_time: Optional[float] = None,
-                 verbosity: batsim_py.simulator.BatsimVerbosity = 'quiet') -> None:
+                 verbosity: batsim_py.simulator.BatsimVerbosity = 'quiet',
+                 shutdown_policy = None,
+                 track_dependencies: bool = False) -> None:
 
-        super().__init__()
+        super().__init__(
+                platform_fn,
+                workload_fn,
+                t_action,
+                seed,
+                simulation_time,
+                verbosity)
 
-        if not platform_fn:
-            raise error.Error("Expected `platform_fn` argument to be a non "
-                              f"empty string, got {platform_fn}.")
-        elif not os.path.exists(platform_fn):
-            raise error.Error(f"File {platform_fn} does not exist.")
-        else:
-            self.platform_fn = platform_fn
-
-        if not workload_fn:
-            raise error.Error("Expected `workload_fn` argument to be a non "
-                              f"empty string, got {platform_fn}.")
-        elif not os.path.exists(workload_fn):
-            raise error.Error(f"File {workload_fn} does not exist.")
-        else:
-            self.workload_fn = workload_fn
-
-        if t_action < 0:
-            raise error.Error("Expected `t_action` argument to be greater "
-                              f"than zero, got {t_action}.")
-
-        self.seed(seed)
-        self.simulator = batsim_py.SimulatorHandler()
-        self.verbosity: batsim_py.simulator.BatsimVerbosity = verbosity
-        self.observation_space, self.action_space = self._get_spaces()
-        ##
-        self.simulation_time = simulation_time
-
-        self.t_action = t_action
         self.track_dependencies = track_dependencies
-        ##
+        self.shutdown_policy = shutdown_policy
         self.host_speeds = self._get_host_speeds()
-
-    def reset(self, seed=None, options=None):
-        self._close_simulator()
-        self._start_simulator()
-
-        self.observation_space, self.action_space = self._get_spaces()
-        return self._get_state(), {}
-
-    def render(self, mode: str = 'human'):
-        raise error.Error(f"Not supported.")
-
-    def close(self):
-        self._close_simulator()
-
-    def seed(self, seed: Optional[int] = None) -> Sequence[int]:
-        self.np_random, s = seeding.np_random(seed)
-        return [s]
-
-    def _close_simulator(self) -> None:
-        self.simulator.close()
-
-    def _start_simulator(self) -> None:
-        if os.path.isdir(self.workload_fn):
-            workloads = os.listdir(self.workload_fn)
-            workloads = [ os.path.join(self.workload_fn, w) for w in workloads if w.endswith('.json') and "dependencies" not in w ]
-
-            workload = self.np_random.choice(workloads)
-        else:
-            workload = self.workload_fn
-
-
-        self.simulator.start(platform=self.platform_fn,
-                             workload=workload,
-                             verbosity=self.verbosity,
-                             simulation_time=self.simulation_time)
-
-###############################################################################
-# Custom Functions
-###############################################################################
 
     def step(self, action: Any) -> Tuple[Any, float, bool, bool, dict]:
         if not self.simulator.is_running or not self.simulator.platform:
@@ -195,22 +131,34 @@ class SimpleEnv(gym.Env):
 
     def _get_reward(self) -> float:
         score = 0.
+        current_time = self.simulator.current_time
 
-        valid_jobs = list( self._get_posible_jobs() )
+        valid_jobs    = list( self._get_posible_jobs() )
+        valid_job_ids = [ int(j.name) for j in valid_jobs ]
 
-        # Delay
-        delayed = sum( int((self.simulator.current_time - j.subtime) > 10) for j in valid_jobs )
+        # Jobs that cant be scheduled
+        invalid_jobs  = sum( 1 for j in self.simulator.queue if j not in valid_job_ids )
 
-        # Dependencies
+        # Jobs that are delayed
+        delayed_jobs  = sum( 1 for j in valid_jobs if (current_time - j.subtime) > 1)
 
-        if len(valid_jobs) != 0:
-            score += sum([ (self.simulator.current_time - j.subtime) < 10 for j in valid_jobs ])
+        score -= invalid_jobs + delayed_jobs
 
-        total = 0
-        if len(self.simulator.queue):
-            total = sum([ j.walltime * j.res for j in self.simulator.queue ]) / len(self.simulator.queue)
+        # Jobs allocated
+        allocated_jobs = [ j for j in self.simulator.jobs if j.is_running and j.start_time == current_time ]
+        allocated_weights = [ j.res * j.walltime for j in allocated_jobs ]
 
-        return score - total
+        if len(allocated_jobs) > 0:
+            score += sum(allocated_weights) / max(allocated_weights)
+
+        # if len(valid_jobs) != 0:
+        #     score += sum([ (self.simulator.current_time - j.subtime) < 10 for j in valid_jobs ])
+
+        # total = 0
+        # if len(self.simulator.queue):
+        #     total = sum([ j.walltime * j.res for j in self.simulator.queue ]) / len(self.simulator.queue)
+
+        return score
 
     def _get_state(self):
         nb_hosts = sum( 1 for _ in self.simulator.platform.hosts )

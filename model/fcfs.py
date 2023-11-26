@@ -1,37 +1,34 @@
 import json
 import numpy as np
+from typing import Optional
+from .metrics import MonitorsInterface
 
 
 class FCFSAgent():
-    def __init__(self):
-        pass
+    def __init__(self, monitors: Optional[MonitorsInterface] = None):
+        self.monitors = monitors
 
     def act(self, state) -> int:
         return 0
 
     def test(self, env):
-        history = { "score": 0, "steps": 0, "info": None }
-        (obs, _), done, info = env.reset(), False, {}
+        if self.monitors:
+            self.monitors.init_episode(env.simulator, True)
 
-        logs = { "scores": [], "queue_len": [], "wait": []}
+        history = { "score": 0, "steps": 0, "info": None }
+        _, done, info = env.reset(), False, {}
 
         while not done:
-            #posible_jobs = any( True for j in obs["queue"]["jobs"] if j[1] <= obs["platform"]["nb_hosts"] )
-            obs, reward, done, _, info = env.step( 0  )
-
-            waits = np.array([ i.waiting_time for i in env.simulator.jobs if i.is_running ])
-            logs["scores"].append(float(reward))
-            logs["queue_len"].append( sum(1 for _ in env.simulator.queue) )
-            logs["wait"].append( waits.mean() if waits.shape[0] else 0. )
-
+            _, reward, done, _, info = env.step( 0  )
 
             history['score'] += reward
             history['steps'] += 1
             history['info']   = info
 
+        if self.monitors:
+            print(f"SAVING IN {self.monitors.save_dir}")
+            self.monitors.record()
 
-        with open('/data/expe-out/play_scores.json', 'w') as fp:
-            json.dump(logs, fp)
 
         print(f"\n[DONE] Score: {history['score']} - Steps: {history['steps']} {len(env.simulator.queue)}")
 

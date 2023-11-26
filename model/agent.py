@@ -1,16 +1,16 @@
 import math
 import random
+from typing import Optional
 import numpy as np
 import datetime
 from pathlib import Path
-from itertools import count
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
 
 from .network import DQN, DDQN
-from .metrics import MetricLogger
+from .metrics import MetricLogger, MonitorsInterface
 from .replay_memory import ReplayMemory, Transition
 
 
@@ -32,7 +32,7 @@ LR = 1e-4
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 class Agent():
-    def __init__(self, state_size):
+    def __init__(self, state_size, monitors: Optional[MonitorsInterface] = None):
         # Q Network
         self.state_size  = state_size
         self.action_size = 1
@@ -56,9 +56,12 @@ class Agent():
 
         # Learning parameters
         self.burnin      = BATCH_SIZE # min. experiences before training
-        self.learn_every = 3   # no. of experiences between updates to Q_online
-        self.sync_every  = 1e4 # no. of experiences between Q_target & Q_online sync
+        self.learn_every = 2   # no. of experiences between updates to Q_online
+        self.sync_every  = 1 # no. of experiences between Q_target & Q_online sync
+        # self.sync_every  = 1e4
         self.save_every  = 5e5 # no. of experiences between saving Net
+
+        self.monitors = monitors
 
 ################################################################################
 # DQN functions
@@ -69,6 +72,7 @@ class Agent():
         # columns of actions taken. These are the actions which would've been taken
         # for each batch state according to policy_net
 
+        #state_action_values = torch.cat([ self.policy_net(i).max(1)[0] for i in state ]).unsqueeze(0)
         state_action_values = torch.cat([ self.policy_net(i).max(1)[0] for i in state ]).unsqueeze(0)
         return state_action_values.gather(1, action.type(torch.int64)).T
 
@@ -86,20 +90,19 @@ class Agent():
         # state value or 0 in case the state was final.
         next_state_values = torch.zeros(BATCH_SIZE, device=device)
         with torch.no_grad():
-            next_state_values[non_final_mask] = torch.tensor([ self.policy_net(i).max(1).values for i in non_final_next_states ])
+            #next_state_values[non_final_mask] = torch.tensor([ self.policy_net(i).max(1).values for i in non_final_next_states ])
+            next_state_values[non_final_mask] = torch.tensor([ self.target_net(i).max(1).values for i in non_final_next_states ])
 
         return (next_state_values * GAMMA) + reward
 
     def _update_online_Q(self, td_estimate, td_target):
         """ Calculates the loss in the actual step, and updates the weights accordingly"""
 
-        print("******")
-        # Compute the Huber Loss
         loss = self.loss_fn(td_estimate, td_target)
-        # Optimize the model
+
         self.optimizer.zero_grad()
         loss.backward()
-         # In-place gradient clipping
+        #torch.nn.utils.clip_grad_value_(self.policy_net.parameters(), 100)
         torch.nn.utils.clip_grad_value_(self.policy_net.parameters(), 100)
         self.optimizer.step()
 
@@ -125,32 +128,25 @@ class Agent():
             with torch.no_grad():
                 action_idx = self.policy_net(state).max(1).indices.view(1,1).item()
 
-        # increment step
         self.steps_done += 1
         return action_idx
 
     def learn(self):
-        '''
         if self.steps_done % self.sync_every == 0:
+            # Soft update of the target network's weights
+            # θ′ ← τ θ + (1 −τ )θ′
             self._sync_Q_target()
 
-        if self.steps_done % self.save_every == 0:
-            #self.save()
-            pass
-        '''
+        # if self.steps_done % self.save_every == 0:
+        #     #self.save()
 
         if self.steps_done < self.burnin:
             return None, None
 
-        '''
-        if self.steps_done % self.learn_every != 0:
-            return None, None
-        '''
+         # if self.steps_done % self.learn_every != 0:
+         #    return None, None
 
         transitions = self.memory.sample(BATCH_SIZE)
-        # Transpose the batch (see https://stackoverflow.com/a/19343/3343043 for
-        # detailed explanation). This converts batch-array of Transitions
-        # to Transition of batch-arrays.
         batch = Transition(*zip(*transitions))
 
         # Sample from memory
@@ -159,16 +155,12 @@ class Agent():
         action_batch = torch.cat(batch.action).unsqueeze(0)
         reward_batch = torch.cat(batch.reward)
 
-        # Get TD Estimate
-        state_action_values = self.td_estimate(state_batch, action_batch)
+        td_est = self.td_estimate(state_batch, action_batch)
+        td_tgt = self.td_target(reward_batch, next_state_batch)
 
-        # Get TD Target
-        expected_state_action_values = self.td_target(reward_batch, next_state_batch)
+        loss = self._update_online_Q(td_est, td_tgt.unsqueeze(1))
 
-        # Backpropagate loss through Q_online
-        loss = self._update_online_Q(state_action_values, expected_state_action_values.unsqueeze(1))
-
-        return loss, expected_state_action_values.mean().item()
+        return loss, td_est.mean().item()
 
     '''
     def optimize_model(self):
@@ -248,14 +240,13 @@ class Agent():
                     self.memory.push(state, action, next_state, reward)
 
                 # Learn
-                # loss, q = self.optimize_model()
                 loss, q = self.learn()
 
-                # Soft update of the target network's weights
-                # θ′ ← τ θ + (1 −τ )θ′
-                self._sync_Q_target()
-
                 # Logging
+                # for m in self.monitors:
+                #    if type(m) == TrainingMonitor:
+                #        m.log_step(reward.item(), loss, q)
+
                 if save and logger:
                     logger.log_step(reward.item(), loss, q)
 
@@ -277,6 +268,9 @@ class Agent():
             self.save()
 
     def test(self, env):
+        if self.monitors:
+            self.monitors.init_episode(env.simulator, True)
+
         history = { "score": 0, "steps": 0, "info": None }
         done, info = False, {}
         state, _ = env.reset()
@@ -290,6 +284,10 @@ class Agent():
             history['score'] += reward
             history['steps'] += 1
             history['info']   = info
+
+        if self.monitors:
+            print(f"SAVING IN {self.monitors.save_dir}")
+            self.monitors.record()
 
         print(f"[DONE] Score: {history['score']} - Steps: {history['steps']}")
 
