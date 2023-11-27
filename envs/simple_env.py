@@ -17,7 +17,7 @@ class SkipTime(gym.Wrapper):
         super().__init__(env)
 
     def _advance_time(self):
-        envv = self.env.unwrapped
+        envv = self.unwrapped
 
         start_t = envv.simulator.current_time
         while envv.simulator.is_running:
@@ -25,9 +25,8 @@ class SkipTime(gym.Wrapper):
 
             if len(valid_jobs) > 0:
                 break
-            else:
-                print(".",end="")
 
+            print(".",end="")
             envv.simulator.proceed_time(envv.t_action)
 
         end_t = envv.simulator.current_time
@@ -38,7 +37,7 @@ class SkipTime(gym.Wrapper):
         super().reset(**kwargs)
         self._advance_time()
 
-        return self.env.unwrapped._get_state(), {}
+        return self.unwrapped._get_state(), {}
 
     def step(self, action):
         """Pass time til a job can be chosen"""
@@ -50,8 +49,8 @@ class SkipTime(gym.Wrapper):
         self._advance_time()
 
         # Update the obs before returning it.
-        obs  = self.env.unwrapped._get_state()
-        done = not self.env.unwrapped.simulator.is_running
+        obs  = self.unwrapped._get_state()
+        done = not self.unwrapped.simulator.is_running
         return obs, reward, done, trunc, info
 
 class SimpleEnv(SchedulingEnv):
@@ -61,6 +60,7 @@ class SimpleEnv(SchedulingEnv):
                  platform_fn: str,
                  workload_fn: str,
                  t_action: int = 1,
+                 t_shutdown: int = 1,
                  seed: Optional[int] = None,
                  simulation_time: Optional[float] = None,
                  verbosity: batsim_py.simulator.BatsimVerbosity = 'quiet',
@@ -76,17 +76,21 @@ class SimpleEnv(SchedulingEnv):
                 verbosity)
 
         self.track_dependencies = track_dependencies
-        self.shutdown_policy = shutdown_policy
-        self.host_speeds = self._get_host_speeds()
+        self.shutdown_policy    = shutdown_policy
+        self.host_speeds        = self._get_host_speeds()
+        self.completed_jobs     = set()
+
+        self.simulator.subscribe(batsim_py.events.JobEvent.COMPLETED, self._on_job_completed)
 
     def step(self, action: Any) -> Tuple[Any, float, bool, bool, dict]:
         if not self.simulator.is_running or not self.simulator.platform:
             raise error.ResetNeeded("Simulation not running.")
 
-        # 1. Get job selected by the agent.
-        available_hosts = self.simulator.platform.get_not_allocated_hosts()
-        posible_jobs = [ j for j in self.simulator.queue if j.res <= len(available_hosts) ]
+        available_hosts = sorted(self.simulator.platform.get_not_allocated_hosts(),
+                key=lambda h: self.host_speeds[h.name])
+        posible_jobs = list( self._get_posible_jobs() )
 
+        # 1. Get job selected by the agent.
         job = posible_jobs[ int(action) ]
 
         # 2. Get the hosts where it's going to be allocated in.
@@ -96,12 +100,16 @@ class SimpleEnv(SchedulingEnv):
         self.simulator.allocate(job.id, res)
         reward = self._get_reward()
 
-        print(f"{self.simulator.current_time}\t({int(action)}/{len(posible_jobs)}, {self.simulator.current_time - job.subtime}) {reward} - {len(posible_jobs)}")
+        print(f"\t{self.simulator.current_time} ({int(action)}/{len(posible_jobs)})",
+              f" - {self.simulator.current_time -- job.subtime} {reward}")
 
         obs = self._get_state()
         done = not self.simulator.is_running
         info = { "workload": self.workload_fn }
         return (obs, reward, done, False, info)
+
+    def _on_job_completed(self, job):
+        self.completed_jobs.add(job.id)
 
     def _get_posible_jobs(self):
         # 1. Check if job can be allocated.
@@ -164,7 +172,6 @@ class SimpleEnv(SchedulingEnv):
         nb_hosts = sum( 1 for _ in self.simulator.platform.hosts )
         nb_avail = sum( 1 for _ in self.simulator.platform.get_not_allocated_hosts() )
 
-        # posible_jobs = [ j for j in self.simulator.queue if j.res <= nb_avail ]
         valid_jobs = list( self._get_posible_jobs() )
 
         # Queue status
@@ -174,10 +181,8 @@ class SimpleEnv(SchedulingEnv):
             jobs[:,0] = [ j.subtime for j in valid_jobs ]
         ## Resources
             jobs[:,1] = [ j.res     for j in valid_jobs ]
-            #jobs[:,1] /= len(available_hosts)
         ## Walltime
             jobs[:,2] = [ j.walltime if j.walltime else -1 for j in valid_jobs ]
-            #jobs[:,2] /= jobs[:,2].max()
         ## Flops
             jobs[:,3] = [ j.profile.cpu or 0 for j in valid_jobs ]
         ## Dependencies
@@ -212,7 +217,6 @@ class SimpleEnv(SchedulingEnv):
         return state
 
     def _get_spaces(self):
-        # TODO - update dis
         nb_avail = nb_jobs = 0
 
         if self.simulator.is_running:
