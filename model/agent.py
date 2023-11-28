@@ -73,8 +73,10 @@ class Agent():
         # for each batch state according to policy_net
 
         #state_action_values = torch.cat([ self.policy_net(i).max(1)[0] for i in state ]).unsqueeze(0)
-        state_action_values = torch.cat([ self.policy_net(i).max(1)[0] for i in state ]).unsqueeze(0)
-        return state_action_values.gather(1, action.type(torch.int64)).T
+        state_action_values = torch.cat([ self.policy_net(i)[0,int(j)].unsqueeze(0) for i,j in zip(state, action.tolist()[0]) ])
+
+        #return state_action_values.gather(1, action.type(torch.int64)).T
+        return state_action_values.unsqueeze(1)
 
     @torch.no_grad()
     def td_target(self, reward, next_state):
@@ -216,7 +218,7 @@ class Agent():
             logger = MetricLogger(save_dir)
 
         #episodes = 40
-        episodes = 10
+        episodes = 40
         for e in range(episodes):
             state, _ = env.reset()
             state = self._process_obs(state)
@@ -296,7 +298,7 @@ class Agent():
         platform = obs["platform"]
 
         # State matrix
-        state = torch.zeros(queue["jobs"].shape[0], 9)
+        state = torch.zeros(queue["jobs"].shape[0], 8)
         for i, (sub, res, wall, flops, deps) in enumerate(queue["jobs"]):
             last_alloc = platform["hosts"][int(res)-1,1]
 

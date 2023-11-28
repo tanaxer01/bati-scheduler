@@ -101,7 +101,7 @@ class SimpleEnv(SchedulingEnv):
         reward = self._get_reward()
 
         print(f"\t{self.simulator.current_time} ({int(action)}/{len(posible_jobs)})",
-              f" - {self.simulator.current_time -- job.subtime} {reward}")
+              f" - {self.simulator.current_time - job.subtime} {reward}")
 
         obs = self._get_state()
         done = not self.simulator.is_running
@@ -109,18 +109,16 @@ class SimpleEnv(SchedulingEnv):
         return (obs, reward, done, False, info)
 
     def _on_job_completed(self, job):
-        self.completed_jobs.add(job.id)
+        self.completed_jobs.add( int(job.name) )
 
     def _get_posible_jobs(self):
-        # 1. Check if job can be allocated.
+        # `get_not_allocated_hosts()` gives us the amount of hosts we can use.
         nb_avail = sum( 1 for _ in self.simulator.platform.get_not_allocated_hosts() )
         resources_met    = lambda x: x.res <= nb_avail
 
-        # 2. Check if jobs dependencies are met.
-        not_finished_jobs = [ int(j.name) for j in self.simulator.jobs ]
-        dependencies_met = lambda x: all( i not in not_finished_jobs for i in x.metadata["dependencies"]) if "dependencies" in x.metadata else True
+        # If dependencies have finished, they should be in completed_jobs.
+        dependencies_met = lambda x: all( i in self.completed_jobs for i in x.metadata["dependencies"]) if "dependencies" in x.metadata else True
 
-        valid_jobs = filter(lambda x: resources_met(x), self.simulator.queue)
         valid_jobs = filter(lambda x: resources_met(x) and (dependencies_met(x) or not self.track_dependencies), self.simulator.queue)
         return valid_jobs
 
@@ -139,33 +137,39 @@ class SimpleEnv(SchedulingEnv):
 
     def _get_reward(self) -> float:
         score = 0.
+        nb_avail = sum( 1 for _ in self.simulator.platform.get_not_allocated_hosts() )
+
+        # `simulator.jobs` only contains unfinished jobs, so we are only considering jobs allocated on current time.
         current_time = self.simulator.current_time
+        allocated_jobs = list( filter(lambda x: x.start_time == current_time, self.simulator.jobs) )
+        allocated_weights = [ np.log(j.profile.cpu / j.walltime) if j.walltime else 0.for j in allocated_jobs ]
 
-        valid_jobs    = list( self._get_posible_jobs() )
-        valid_job_ids = [ int(j.name) for j in valid_jobs ]
-
-        # Jobs that cant be scheduled
-        invalid_jobs  = sum( 1 for j in self.simulator.queue if j not in valid_job_ids )
-
-        # Jobs that are delayed
-        delayed_jobs  = sum( 1 for j in valid_jobs if (current_time - j.subtime) > 1)
-
-        score -= invalid_jobs + delayed_jobs
-
-        # Jobs allocated
-        allocated_jobs = [ j for j in self.simulator.jobs if j.is_running and j.start_time == current_time ]
-        allocated_weights = [ j.res * j.walltime for j in allocated_jobs ]
-
-        if len(allocated_jobs) > 0:
+        if len(allocated_weights) > 0:
             score += sum(allocated_weights) / max(allocated_weights)
 
-        # if len(valid_jobs) != 0:
-        #     score += sum([ (self.simulator.current_time - j.subtime) < 10 for j in valid_jobs ])
+        # More jobs that can still enter the knapsack should generate a better reward.
+        valid_jobs   = list( self._get_posible_jobs() )
 
-        # total = 0
-        # if len(self.simulator.queue):
-        #     total = sum([ j.walltime * j.res for j in self.simulator.queue ]) / len(self.simulator.queue)
+        print(f"VAL: {len(valid_jobs)} - {valid_jobs}")
 
+        # Invalid jobs should generate a discount depening the reason ( res or dependencies ).
+        invalid_jobs = [ i for i in self.simulator.queue if i.name not in map(lambda x: x.name, valid_jobs) ]
+        res_limited  = [ i for i in self.simulator.queue if i.res > nb_avail ]
+        dep_limited  = [ i for i in invalid_jobs if i.name not in map(lambda x: x.name, res_limited) ]
+
+        print(f"INV: {len(invalid_jobs)} - {res_limited} {dep_limited}")
+        res_discount  = sum([ current_time - i.subtime for i in res_limited ]) / len(res_limited) if len(res_limited) > 0 else 0.
+        dep_discount  = sum([ 1 for _ in dep_limited ]) / len(dep_limited) if len(dep_limited) > 0 else 0.
+
+        score -= res_discount + dep_discount
+
+        allocated_jobs = [ j for j in self.simulator.jobs if j.start_time == current_time ]
+        print("1.", a := [ j.profile.cpu if hasattr(j.profile, "cpu") else -1  for j in allocated_jobs ])
+        print("2.", b := [ j.walltime if j.walltime != None else -1  for j in allocated_jobs ])
+        print("3.", c := [ np.log(i / j) if j != 0 else 0. for i, j in zip(a, b) ])
+        print("4.", sum(c), invalid_jobs )
+
+        #return sum(c) - invalid_jobs
         return score
 
     def _get_state(self):
@@ -186,7 +190,9 @@ class SimpleEnv(SchedulingEnv):
         ## Flops
             jobs[:,3] = [ j.profile.cpu or 0 for j in valid_jobs ]
         ## Dependencies
-            jobs[:,4] = [ len(j.metadata["dependencies"]) if "dependencies" in j.metadata else 0 for j in valid_jobs ]
+            queue_deps = sum([ i.metadata["dependencies"] for i in self.simulator.queue if "dependencies" in i.metadata ], [])
+            jobs[:,4] = [ queue_deps.count(int(i.name)) for i in valid_jobs ]
+            # jobs[:,4] = [ len(j.metadata["dependencies"]) if "dependencies" in j.metadata else 0 for j in valid_jobs ]
 
         queue = { "size": len(valid_jobs), "jobs": jobs }
 

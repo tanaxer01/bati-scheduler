@@ -1,79 +1,32 @@
+from pathlib import Path
 import matplotlib.pyplot as plt
-import numpy as np
-import json
-import sys
+import pandas as pd
+import re
+
+import evalys
+from evalys.jobset import JobSet
 
 
-def train():
-    with open("../expe-out/scores.json") as scores_f:
-        scores = json.load(scores_f)
+def logs_to_df(folder: Path, file_types: list[str]):
+    df = { file_type: pd.DataFrame() for file_type in file_types }
 
-    for i in scores.values():
-        scores, queue_len, wait, loss = np.array(i["scores"]), i["queue_len"], np.array(i["wait"]), i["loss"]
+    for file_type in file_types:
+        for experience in folder.glob(f"{file_type}-*.out"):
+            exp_name = re.search(r"-([^-.]+).out", str(experience)).group(1)
 
-        scores = scores[ scores != 0 ]
-        mean_score = [ scores[:i].mean() for i in range(scores.shape[0]) ]
+            tmp_df = pd.read_csv(str(experience))
+            tmp_df["schedule"] = exp_name
 
-        mean_wait = wait.mean()
-        print(mean_wait)
+            df[file_type] = df[file_type].append(tmp_df)
+        df[file_type].set_index("schedule", inplace=True)
 
-        mean_loss = [ sum(loss[:i])/i for i in range(1, len(loss)) ]
+    return df
 
-        plt.figure()
-        plt.subplot(4,1,1)
-        plt.plot(scores)
-        plt.plot(mean_score)
+def logs_to_jobset(folder: Path):
+    jobsets = {}
+    for experience in folder.glob(f"JobMonitor-*.out"):
+        exp_name = re.search(r"-([^-.]+).out", str(experience)).group(1)
+        jobsets[exp_name] = JobSet.from_csv(str(experience))
 
-        plt.subplot(4,1,2)
-        plt.plot(queue_len)
-
-        plt.subplot(4,1,3)
-        plt.ylim([0, 50])
-        plt.plot(wait)
-        #plt.axhline(y=10, color='r')
-
-        plt.subplot(4,1,4)
-        plt.plot(loss)
-        plt.show()
-
-
-def play():
-    with open("../expe-out/play_scores.json") as scores_f:
-        logs = json.load(scores_f)
-
-    scores, queue_len, wait = np.array(logs["scores"]), logs["queue_len"], np.array(logs["wait"])
-
-    scores = scores[ scores != 0 ]
-    mean_score = [ scores[:i].mean() for i in range(scores.shape[0]) ]
-
-    mean_wait = wait.mean()
-    print(mean_wait)
-
-    plt.figure()
-    plt.subplot(3,1,1)
-    plt.plot(scores)
-    plt.plot(mean_score)
-
-    plt.subplot(3,1,2)
-    plt.plot(queue_len)
-
-    plt.subplot(3,1,3)
-    #plt.ylim([0, 50])
-    plt.plot(wait)
-    plt.axhline(y=1, color='r')
-
-
-    plt.show()
-
-
-if __name__ == "__main__":
-    if len(sys.argv) == 1 or sys.argv[1] == "train":
-        train()
-    else:
-        print(sys.argv)
-        play()
-
-
-
-
+    return jobsets
 

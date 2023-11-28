@@ -1,22 +1,23 @@
 import batsim_py
 
 from envs.simple_env import SimpleEnv, SkipTime
+from envs.shutdown_policies import TimeoutPolicy
 
 from model.metrics import MonitorsInterface
 
 from model.agent import Agent
 from model.fcfs  import FCFSAgent
 
-
 print("[TRAIN]")
 
-state_size = 9
+state_size = 8
 env = SimpleEnv(
         platform_fn = "/data/platforms/FatTree/fat_tree_4.xml",
         workload_fn = "/data/workloads/training4",
         track_dependencies=True,
         t_action = 5,
-        t_shutdown = 60
+        t_shutdown = 1,
+        #shutdown_policy = TimeoutPolicy
         )
 env = SkipTime(env)
 
@@ -34,17 +35,18 @@ env = SimpleEnv(
         workload_fn = "/data/workloads/test/w.json",
         track_dependencies=True,
         t_action = 5,
-        t_shutdown = 60)
+        t_shutdown = 4)
 env = SkipTime(env)
 
 batsim_monitors = MonitorsInterface(
-        name = "DQN_TEST",
+        name = "2TEST",
         save_dir ="/data/expe-out",
         monitors_fns = [
             batsim_py.monitors.JobMonitor,
             batsim_py.monitors.SimulationMonitor,
             batsim_py.monitors.SchedulerMonitor,
-            batsim_py.monitors.ConsumedEnergyMonitor
+            batsim_py.monitors.ConsumedEnergyMonitor,
+            batsim_py.monitors.HostStateSwitchMonitor
         ])
 
 #agent = FCFSAgent(batsim_monitors)
