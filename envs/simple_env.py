@@ -27,7 +27,8 @@ class SkipTime(gym.Wrapper):
                 break
 
             print(".",end="")
-            envv.simulator.proceed_time(envv.t_action)
+            # envv.simulator.proceed_time(envv.t_action)
+            envv.simulator.proceed_time()
 
         end_t = envv.simulator.current_time
         if start_t != end_t:
