@@ -1,3 +1,4 @@
+from batsim_py import simulator
 from gymnasium import error, spaces
 from typing import Any, Tuple
 import numpy as np
@@ -13,6 +14,7 @@ class BackfillEnv(SchedulingEnv):
         self._start_simulator()
 
         self._fcfs_til_next_step()
+        # Simulation ended xd
 
         self.observation_space, self.action_space = self._get_spaces()
         return self._get_state(), {}
@@ -95,7 +97,11 @@ class BackfillEnv(SchedulingEnv):
                 # Found next valid state or the simulation ended.
                 return not self.simulator.is_running
 
-            self.simulator.proceed_time()
+            if self.t_action is None:
+                self.simulator.proceed_time()
+            else:
+                self.simulator.proceed_time(self.t_action)
+
 
     def _get_reward(self) -> float:
         total = 0.

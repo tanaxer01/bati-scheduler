@@ -1,3 +1,4 @@
+from typing import Optional
 import batsim_py
 
 from envs.simple_env        import SimpleEnv
@@ -7,48 +8,55 @@ from envs.shutdown_policies import TimeoutPolicy
 from model.metrics  import MonitorsInterface
 
 from model.agent    import Agent
-from model.bf_agent import BFAgent
 from model.fcfs     import FCFSAgent
 
+# Meanwhile
+STATE_SIZE = 5
 
-print("[TRAIN]")
+def init_monitors(name, dir="/data/expe-out"):
+    return MonitorsInterface(
+            name = name,
+            save_dir =dir,
+            monitors_fns = [
+                batsim_py.monitors.JobMonitor,
+                batsim_py.monitors.SimulationMonitor,
+                batsim_py.monitors.SchedulerMonitor,
+                batsim_py.monitors.ConsumedEnergyMonitor,
+                batsim_py.monitors.HostStateSwitchMonitor
+            ])
 
-state_size = 5
-#state_size = 8
+def train_model(env_fn: type, platform_fn: str, workload_fn: str):
+    print("[TRAIN]")
+    env = env_fn(platform_fn=platform_fn, workload_fn=workload_fn, t_action = 10)
+    agent = Agent(STATE_SIZE)
 
-#env = BackfillEnv(
-env = SimpleEnv(
-    platform_fn = "/data/platforms/FatTree/fat_tree_4.xml",
-    workload_fn = "/data/workloads/training4",
-    t_action = 5)
+    agent.play(env, 40, True)
 
-agent = Agent(state_size)
-#agent = BFAgent(state_size)
+def test_model(name:str, env_fn: type, platform_fn: str, test_fn: str, train_fn: Optional[str]= None):
+    if train_fn != None:
+        train_model(env_fn, platform_fn, train_fn)
 
-agent.play(env, True)
+    print("[TEST]")
+    env = env_fn(platform_fn=platform_fn, workload_fn=test_fn, t_action=5)
 
-print("[TEST]")
+    monitors = init_monitors(name)
+    agent = Agent(STATE_SIZE, monitors=monitors)
+    agent.load("/data/expe-out/network.chkpt/netwrk")
 
-#env = BackfillEnv(
-env = SimpleEnv(
-    platform_fn = "/data/platforms/FatTree/fat_tree_4.xml",
-    workload_fn = "/data/workloads/test/w.json",
-    t_action = 5)
+    agent.test(env)
 
-batsim_monitors = MonitorsInterface(
-        name = "EASY+DQN",
-        save_dir ="/data/expe-out",
-        monitors_fns = [
-            batsim_py.monitors.JobMonitor,
-            batsim_py.monitors.SimulationMonitor,
-            batsim_py.monitors.SchedulerMonitor,
-            batsim_py.monitors.ConsumedEnergyMonitor,
-            batsim_py.monitors.HostStateSwitchMonitor
-        ])
+plat  = "/data/platforms/FatTree/fat_tree_heterogeneous.xml"
+plat2  = "/data/platforms/FatTree/generated.xml"
+train = "/data/workloads/training"
 
+plat4  = "/data/platforms/FatTree/fat_tree_4.xml"
+train4 = "/data/workloads/training4"
 
-#agent = BFAgent(state_size, monitors=batsim_monitors)
-agent = Agent(state_size, monitors=batsim_monitors)
-agent.load("/data/expe-out/network.chkpt/netwrk")
+test  = "/data/workloads/test/w.json"
 
-agent.test(env)
+### DQN4
+test_model("DQN", SimpleEnv, plat2, test, train)
+
+### BACK+DQN4
+test_model("EASY+DQN", BackfillEnv, plat, test, train)
+

@@ -36,10 +36,10 @@ def run_simulation(scheduler, platform_path: str, workload_path: str):
 
 
 run_simulation(FCFSScheduler,
-               "/data/platforms/FatTree/fat_tree_4.xml",
+               "/data/platforms/FatTree/generated.xml",
                "/data/workloads/test/w.json")
 
 run_simulation(EASYScheduler,
-               "/data/platforms/FatTree/fat_tree_4.xml",
+               "/data/platforms/FatTree/generated.xml",
                "/data/workloads/test/w.json")
 

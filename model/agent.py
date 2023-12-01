@@ -63,20 +63,17 @@ class Agent():
 
         self.monitors = monitors
 
-################################################################################
-# DQN functions
-################################################################################
-
     def td_estimate(self, state, action):
+        ''' Computes Q(s_t, a), and then '''
         # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
         # columns of actions taken. These are the actions which would've been taken
         # for each batch state according to policy_net
 
-        #state_action_values = torch.cat([ self.policy_net(i).max(1)[0] for i in state ]).unsqueeze(0)
-        state_action_values = torch.cat([ self.policy_net(i)[0,int(j)].unsqueeze(0) for i,j in zip(state, action.tolist()[0]) ])
+        state_action_values = torch.cat([ self.policy_net(i).max(1)[0] for i in state ]).unsqueeze(0)
+        #state_action_values = torch.cat([ self.policy_net(i)[0,int(j)].unsqueeze(0) for i,j in zip(state, action.tolist()[0]) ])
 
-        #return state_action_values.gather(1, action.type(torch.int64)).T
-        return state_action_values.unsqueeze(1)
+        return state_action_values.gather(1, action.type(torch.int64)).T
+        #return state_action_values.unsqueeze(1)
 
     @torch.no_grad()
     def td_target(self, reward, next_state):
@@ -206,7 +203,7 @@ class Agent():
         self.policy_net.load_state_dict(checkpoint["model"])
         self.target_net.load_state_dict(checkpoint["model"])
 
-    def play(self, env, save=False):
+    def play(self, env, episodes=40,save=False):
         use_cuda = torch.cuda.is_available()
         print(f"Using CUDA: {use_cuda}", end="\n\n")
 
@@ -217,8 +214,6 @@ class Agent():
 
             logger = MetricLogger(save_dir)
 
-        #episodes = 40
-        episodes = 10
         for e in range(episodes):
             state, _ = env.reset()
             state = self._process_obs(state)
@@ -277,6 +272,16 @@ class Agent():
         done, info = False, {}
         state, _ = env.reset()
         state = self._process_obs(state)
+
+        if state.size(0) == 0:
+            print("NO BACKFILL NEEDED")
+            if self.monitors:
+                print(f"SAVING IN {self.monitors.save_dir}")
+                self.monitors.record()
+            return
+
+
+        print(state.shape)
 
         # Play the game!
         while not done:

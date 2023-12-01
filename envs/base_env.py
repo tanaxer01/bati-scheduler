@@ -18,7 +18,7 @@ class SchedulingEnv(gym.Env):
             self,
             platform_fn : str,
             workload_fn : str,
-            t_action : int = 1,
+            t_action : Optional[int] = None,
             seed : Optional[int] = None,
             simulation_time : Optional[float] = None,
             verbosity : BatsimVerbosity = "quiet") -> None:
@@ -39,10 +39,6 @@ class SchedulingEnv(gym.Env):
             raise error.Error(f"File {workload_fn} does not exist.")
         else:
             self.workload_fn = workload_fn
-
-        if t_action < 0:
-            raise error.Error("Expected `t_action` argument to be greater "
-                              f"than zero, got {t_action}.")
 
         self.seed(seed)
         self.simulator = batsim_py.SimulatorHandler()
