@@ -1,5 +1,3 @@
-import json
-import numpy as np
 from typing import Optional
 from .metrics import MonitorsInterface
 
@@ -7,9 +5,6 @@ from .metrics import MonitorsInterface
 class FCFSAgent():
     def __init__(self, monitors: Optional[MonitorsInterface] = None):
         self.monitors = monitors
-
-    def act(self, state) -> int:
-        return 0
 
     def test(self, env):
         if self.monitors:
@@ -19,7 +14,7 @@ class FCFSAgent():
         _, done, info = env.reset(), False, {}
 
         while not done:
-            _, reward, done, _, info = env.step( 0  )
+            _, reward, done, _, info = env.step(0)
 
             history['score'] += reward
             history['steps'] += 1

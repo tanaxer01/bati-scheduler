@@ -1,80 +1,17 @@
-from typing import Any, Dict, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
+from gymnasium import error, spaces
 import xml.etree.ElementTree as ET
-
 import numpy as np
 
-import batsim_py
+from batsim_py.simulator import BatsimVerbosity
 from batsim_py.jobs import Job
-from batsim_py.resources import HostState
-
-import gymnasium as gym
-from gymnasium import error, spaces
+import batsim_py
 
 from .base_env import SchedulingEnv
 
 INF = float('inf')
 
-class SkipTime(gym.Wrapper):
-    """Wrapper that advances the simulation time until there is a valid state to process"""
-
-    def __init__(self, env):
-        super().__init__(env)
-
-    def _advance_time(self):
-        envv = self.unwrapped
-
-        start_t = envv.simulator.current_time
-        while envv.simulator.is_running:
-            valid_jobs = envv._get_posible_jobs()
-
-            if len(valid_jobs) > 0:
-                break
-
-            print(".",end="")
-            # envv.simulator.proceed_time(envv.t_action)
-            envv.simulator.proceed_time()
-
-        end_t = envv.simulator.current_time
-        done  = not envv.simulator.is_running
-        if start_t != end_t and not done:
-            idle_hosts = filter(lambda x: x.state == HostState.IDLE, self.unwrapped.simulator.platform.hosts)
-            sorted_idle = sorted(list( idle_hosts ), key=lambda x: self.unwrapped.host_speeds[x.name])
-
-            if len(sorted_idle) > 2:
-                #print([ i.state.value for i in sorted_idle ])
-                print(len(sorted_idle),[ i.state.value for i in self.simulator.platform.hosts ], end=" - ")
-                #print( "==>", [ i.is_unavailable for i in sorted_idle ])
-                #self.simulator.switch_off([ i.id for i in sorted_idle[-1:] ])
-                print(len(sorted_idle),[ i.state.value for i in self.simulator.platform.hosts ])
-
-
-
-
-            print(f"\n<< Start assignation {self.unwrapped.simulator.current_time}>>")
-
-
-    def reset(self, **kwargs):
-        super().reset(**kwargs)
-        self._advance_time()
-
-        return self.unwrapped._get_state(), {}
-
-    def step(self, action):
-        """Pass time til a job can be chosen"""
-
-        # Select the task
-        obs, reward, done, trunc, info  = super().step(action)
-
-        # Advance time til next valid state
-        self._advance_time()
-
-        # Update the obs before returning it.
-        obs  = self.unwrapped._get_state()
-        done = not self.unwrapped.simulator.is_running
-        return obs, reward, done, trunc, info
-
 class SimpleEnv(SchedulingEnv):
-    """Simple scheduling environment that can enforce dependencies between tasks"""
 
     def __init__(self,
                  platform_fn: str,
@@ -83,7 +20,7 @@ class SimpleEnv(SchedulingEnv):
                  t_shutdown: int = 1,
                  seed: Optional[int] = None,
                  simulation_time: Optional[float] = None,
-                 verbosity: batsim_py.simulator.BatsimVerbosity = 'quiet',
+                 verbosity: BatsimVerbosity = 'quiet',
                  shutdown_policy = None,
                  track_dependencies: bool = False) -> None:
 
@@ -95,53 +32,34 @@ class SimpleEnv(SchedulingEnv):
                 simulation_time,
                 verbosity)
 
-        self.track_dependencies = track_dependencies
-        self.shutdown_policy    = shutdown_policy
-        self.host_speeds        = self._get_host_speeds()
-        self.completed_jobs     = set()
+        self.host_speeds : Dict[str, float] = self._get_host_speeds()
+        self.completed_jobs : Set[int] = {*()}
 
         self.simulator.subscribe(batsim_py.events.JobEvent.COMPLETED, self._on_job_completed)
 
-    def step(self, action: Any) -> Tuple[Any, float, bool, bool, dict]:
-        if not self.simulator.is_running or not self.simulator.platform:
-            raise error.ResetNeeded("Simulation not running.")
-
-        available_hosts = self.simulator.platform.get_not_allocated_hosts()
-        posible_jobs = self._get_posible_jobs()
-
-        # 1. Get job selected by the agent.
-        job = posible_jobs[ int(action) ]
-
-        # 2. Get the hosts where it's going to be allocated in.
-        res = [ h.id for h in available_hosts[:job.res] ]
-
-        # 3. Allocate and measure reward.
-        self.simulator.allocate(job.id, res)
-        reward = self._get_reward()
-
-        print(f"\t{self.simulator.current_time} ({int(action)}/{len(posible_jobs)})",
-              f" - {self.simulator.current_time - job.subtime} {reward}")
-
-        obs = self._get_state()
-        done = not self.simulator.is_running
-        info = { "workload": self.workload_fn }
-        return (obs, reward, done, False, info)
-
-    def _on_job_completed(self, job) -> None:
-        self.completed_jobs.add( int(job.name) )
-
-    def _get_posible_jobs(self) -> Sequence[Job]:
-        """ Returns all jobs that fit in the remaining Hosts and that their requisite jobs have been completed. """
+    @property
+    def valid_jobs(self) -> List[Job]:
+        """  Filter input and returns all jobs that can be allocated """
 
         # `get_not_allocated_hosts()` gives us the hosts which are available for allocating jobs.
         nb_avail = sum( 1 for _ in self.simulator.platform.get_not_allocated_hosts() )
 
         resources_met    = lambda x: x.res <= nb_avail
-        # If dependencies have finished, they should be in completed_jobs.
-        dependencies_met = lambda x: all( i in self.completed_jobs for i in x.metadata["dependencies"]) if "dependencies" in x.metadata else True
+        dependencies_met = lambda x: "real_subtime" in x.metadata or "dependencies" not in x.metadata
 
-        valid_jobs = filter(lambda x: resources_met(x) and (dependencies_met(x) or not self.track_dependencies), self.simulator.queue)
-        return list(valid_jobs)
+        # Jobs real subtime needs to take into account when they became available
+        valid_jobs  = filter(lambda x: resources_met(x) and dependencies_met(x), self.simulator.queue)
+        sorted_jobs = sorted(valid_jobs, key=lambda x: x.metadata["real_subtime"] if "dependencies" in x.metadata else x.subtime)
+        return sorted_jobs
+
+    def reset(self, seed=None, options=None) -> Any:
+        self._close_simulator()
+        self._start_simulator()
+
+        self._advance_time()
+
+        self.observation_space, self.action_space = self._get_spaces()
+        return self._get_state(), {}
 
     def _get_host_speeds(self) -> Dict[str, float]:
         """ Reads the compputing seeds of each host, and stores them in Kflops """
@@ -157,6 +75,60 @@ class SimpleEnv(SchedulingEnv):
 
         return norm_speeds
 
+    def _on_job_completed(self, job: Job) -> None:
+        """
+        This function keeps track of completed jobs and updates the real time when jobs with
+        dependencies became available.
+        """
+
+        self.completed_jobs.add( int(job.name) )
+
+        child_nodes = filter(lambda j: "dependencies" in j.metadata and int(job.name) in j.metadata["dependencies"], self.simulator.jobs)
+        for j in child_nodes:
+            # This ensures that if the job has more than one dependency, `real_subtime` will take the value of the last one.
+            j.metadata["real_subtime"] = self.simulator.current_time
+
+    def step(self, action: int) -> Tuple[Any, float, bool, bool, dict]:
+        if not self.simulator.is_running or not self.simulator.platform:
+            raise error.ResetNeeded("Simulation not running.")
+
+        available_hosts = sorted(self.simulator.platform.get_not_allocated_hosts(), key=lambda h: self.host_speeds[h.name], reverse=True)
+        posible_jobs = self.valid_jobs
+
+        # 1. Get job selected by the agent.
+        job = posible_jobs[ int(action) ]
+
+        # 2. Get the hosts where it's going to be allocated in.
+        res = [ h.id for h in available_hosts[:job.res] ]
+
+        # 3. Allocate and measure reward.
+        self.simulator.allocate(job.id, res)
+        reward = self._get_reward()
+
+        print(f"\t{self.simulator.current_time} ({int(action)}/{len(posible_jobs)})",
+              f" - {self.simulator.current_time - job.subtime} {reward}")
+
+        # 4. Advance time til next valid state
+        truncated = self._advance_time()
+        if truncated:
+            print(f"\n<< Start assignation {self.simulator.current_time}>>")
+
+        obs  = self._get_state()
+        info = { "workload": self.workload_fn }
+        terminated = not self.simulator.is_running
+        return (obs, reward, terminated, truncated, info)
+
+    def _advance_time(self):
+        start_t = self.simulator.current_time
+
+        while self.simulator.is_running:
+            if len(self.valid_jobs) > 0:
+                break
+            self.simulator.proceed_time()
+
+        end_t = self.simulator.current_time
+        return end_t != start_t
+
     def _get_reward(self) -> float:
         score = 0.
         current_time = self.simulator.current_time
@@ -169,7 +141,7 @@ class SimpleEnv(SchedulingEnv):
         score += allocated_weights.mean()
 
         # If there are jobs that still can enter the knapsack, the reward should be better.
-        valid_jobs   = self._get_posible_jobs()
+        valid_jobs   = self.valid_jobs
 
 
         # Invalid jobs should generate a discount depening the reason ( resources needed or dependencies ).
@@ -190,7 +162,7 @@ class SimpleEnv(SchedulingEnv):
         nb_hosts = sum( 1 for _ in self.simulator.platform.hosts )
         nb_avail = sum( 1 for _ in self.simulator.platform.get_not_allocated_hosts() )
 
-        valid_jobs = self._get_posible_jobs()
+        valid_jobs = self.valid_jobs
 
         # Queue status
         jobs = np.zeros( (len(valid_jobs), 5) )
@@ -249,4 +221,6 @@ class SimpleEnv(SchedulingEnv):
         action_space = spaces.Discrete(1)
 
         return observation_space, action_space
+
+
 

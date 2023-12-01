@@ -21,7 +21,7 @@ from .replay_memory import ReplayMemory, Transition
 # EPS_DECAY controls the rate of exponential decay of epsilon, higher means a slower decay
 # TAU is the update rate of the target network
 # LR is the learning rate of the ``AdamW`` optimizer
-BATCH_SIZE = 32
+BATCH_SIZE = 64
 GAMMA = 0.999
 EPS_START = 0.9
 EPS_END = 0.05
@@ -218,7 +218,7 @@ class Agent():
             logger = MetricLogger(save_dir)
 
         #episodes = 40
-        episodes = 40
+        episodes = 20
         for e in range(episodes):
             state, _ = env.reset()
             state = self._process_obs(state)

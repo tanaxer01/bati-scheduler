@@ -5,3 +5,4 @@ platforms/heterogeneous
 platforms/*.xml
 workloads
 env
+expe-out/checkpoints/*
