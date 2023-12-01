@@ -36,7 +36,6 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 class BFAgent(Agent):
     def _process_obs(self, obs):
-        state = torch.zeros(obs["size"], 4)
 
         '''
         for i, (wait, res, wall, flops, deps) in enumerate(obs["jobs"]):

@@ -1,241 +1,252 @@
+from typing import Any, Dict, Optional, Sequence, Tuple
+import xml.etree.ElementTree as ET
+
 import numpy as np
 
-from gym import error, spaces
-import xml.etree.ElementTree as ET
-from gridgym.envs.grid_env import GridEnv, batsim_py
-from typing import Any, Optional, Tuple, Dict
-
+import batsim_py
 from batsim_py.jobs import Job
-from batsim_py.resources import Host
-from batsim_py import SimulatorHandler, SimulatorEvent, HostEvent, JobEvent
+from batsim_py.resources import HostState
 
+import gymnasium as gym
+from gymnasium import error, spaces
+
+from .base_env import SchedulingEnv
 
 INF = float('inf')
 
-class ShutdownPolicy():
-    def __init__(self, timeout: int, simulator: SimulatorHandler):
-        super().__init__()
-        self.timeout = timeout
-        self.simulator = simulator
-        self.idle_servers: Dict[int, float] = {}
+class SkipTime(gym.Wrapper):
+    """Wrapper that advances the simulation time until there is a valid state to process"""
 
-        self.simulator.subscribe(
-            HostEvent.STATE_CHANGED, self._on_host_state_changed)
-        self.simulator.subscribe(
-            SimulatorEvent.SIMULATION_BEGINS, self._on_sim_begins)
+    def __init__(self, env):
+        super().__init__(env)
 
-    def shutdown_idle_hosts(self, *args, **kwargs):
-        hosts_to_turnoff = []
-        for h_id, start_t in list(self.idle_servers.items()):
-            if self.simulator.current_time - start_t >= self.timeout:
-                hosts_to_turnoff.append(h_id)
-                del self.idle_servers[h_id]
+    def _advance_time(self):
+        envv = self.unwrapped
 
-        if hosts_to_turnoff:
-            self.simulator.switch_off(hosts_to_turnoff)
+        start_t = envv.simulator.current_time
+        while envv.simulator.is_running:
+            valid_jobs = envv._get_posible_jobs()
 
-    def _on_host_state_changed(self, host: Host):
-        if host.is_idle:
-            if host.id not in self.idle_servers:
-                self.idle_servers[host.id] = self.simulator.current_time
-                t = self.simulator.current_time + self.timeout
-                self.simulator.set_callback(t, self.shutdown_idle_hosts)
-        else:
-            self.idle_servers.pop(host.id, None)
+            if len(valid_jobs) > 0:
+                break
 
-    def _on_sim_begins(self, _):
-        self.idle_servers.clear()
-        for h in self.simulator.platform.hosts:
-            if h.is_idle:
-                self.idle_servers[h.id] = self.simulator.current_time
-                t = self.simulator.current_time + self.timeout
-                self.simulator.set_callback(t, self.shutdown_idle_hosts)
+            print(".",end="")
+            # envv.simulator.proceed_time(envv.t_action)
+            envv.simulator.proceed_time()
 
-class QueueEnv(GridEnv):
+        end_t = envv.simulator.current_time
+        done  = not envv.simulator.is_running
+        if start_t != end_t and not done:
+            idle_hosts = filter(lambda x: x.state == HostState.IDLE, self.unwrapped.simulator.platform.hosts)
+            sorted_idle = sorted(list( idle_hosts ), key=lambda x: self.unwrapped.host_speeds[x.name])
+
+            if len(sorted_idle) > 2:
+                #print([ i.state.value for i in sorted_idle ])
+                print(len(sorted_idle),[ i.state.value for i in self.simulator.platform.hosts ], end=" - ")
+                #print( "==>", [ i.is_unavailable for i in sorted_idle ])
+                #self.simulator.switch_off([ i.id for i in sorted_idle[-1:] ])
+                print(len(sorted_idle),[ i.state.value for i in self.simulator.platform.hosts ])
+
+
+
+
+            print(f"\n<< Start assignation {self.unwrapped.simulator.current_time}>>")
+
+
+    def reset(self, **kwargs):
+        super().reset(**kwargs)
+        self._advance_time()
+
+        return self.unwrapped._get_state(), {}
+
+    def step(self, action):
+        """Pass time til a job can be chosen"""
+
+        # Select the task
+        obs, reward, done, trunc, info  = super().step(action)
+
+        # Advance time til next valid state
+        self._advance_time()
+
+        # Update the obs before returning it.
+        obs  = self.unwrapped._get_state()
+        done = not self.unwrapped.simulator.is_running
+        return obs, reward, done, trunc, info
+
+class SimpleEnv(SchedulingEnv):
+    """Simple scheduling environment that can enforce dependencies between tasks"""
+
     def __init__(self,
                  platform_fn: str,
-                 workloads_dir: str,
+                 workload_fn: str,
                  t_action: int = 1,
-                 t_shutdown: int = 0,
-                 hosts_per_server: int = 1,
-                 queue_max_len: int = 20,
+                 t_shutdown: int = 1,
                  seed: Optional[int] = None,
-                 external_events_fn: Optional[str] = None,
-                 simulation_time: Optional[float] = None) -> None:
+                 simulation_time: Optional[float] = None,
+                 verbosity: batsim_py.simulator.BatsimVerbosity = 'quiet',
+                 shutdown_policy = None,
+                 track_dependencies: bool = False) -> None:
 
-        if t_action < 0:
-            raise error.Error("Expecter `t_action` argument to be greater "
-                              f"than zero, got {t_action}.")
+        super().__init__(
+                platform_fn,
+                workload_fn,
+                t_action,
+                seed,
+                simulation_time,
+                verbosity)
 
+        self.track_dependencies = track_dependencies
+        self.shutdown_policy    = shutdown_policy
+        self.host_speeds        = self._get_host_speeds()
+        self.completed_jobs     = set()
 
-        self.queue_max_len = queue_max_len
-        self.t_action = t_action
+        self.simulator.subscribe(batsim_py.events.JobEvent.COMPLETED, self._on_job_completed)
 
-        super().__init__(platform_fn, workloads_dir, seed,
-                         external_events_fn, simulation_time, True,
-                         hosts_per_server=hosts_per_server)
+    def step(self, action: Any) -> Tuple[Any, float, bool, bool, dict]:
+        if not self.simulator.is_running or not self.simulator.platform:
+            raise error.ResetNeeded("Simulation not running.")
 
-        #self.simulator.subscribe(
-        #        JobEvent.SUBMITTED, self._on_job_submitted)
+        available_hosts = self.simulator.platform.get_not_allocated_hosts()
+        posible_jobs = self._get_posible_jobs()
 
-        self.simulator.subscribe(JobEvent.COMPLETED, self._on_job_completed)
-        self.shutdown_policy = ShutdownPolicy(t_shutdown, self.simulator)
+        # 1. Get job selected by the agent.
+        job = posible_jobs[ int(action) ]
 
-        root = ET.parse(platform_fn).getroot()
+        # 2. Get the hosts where it's going to be allocated in.
+        res = [ h.id for h in available_hosts[:job.res] ]
 
-        prefixes = { "G": 10e9, "M": 10e6, "K": 10e3 }
-        to_int = lambda x: float(x[:-1]) * prefixes[x[-1]]
+        # 3. Allocate and measure reward.
+        self.simulator.allocate(job.id, res)
+        reward = self._get_reward()
 
-        self.host_speeds = { h.attrib["id"]: to_int(h.get("speed").split(",")[0][:-1])
-                                for h in root.iter("host") }
-
-        self.running_jobs  = dict()
-        self.completed_jobs = set()
-
-    def _on_job_completed(self, job):
-        self.completed_jobs.add(job.id)
-        self.running_jobs.pop(job.id)
-
-    def step(self, action) -> Tuple[Any, float, bool, dict]:
-        assert self.simulator.is_running and self.simulator.platform, f"Simulation not running."
-        #assert 0 <= action <= self.queue_max_len, f"Invalid Action: {action}, max action: {len(self.simulator.queue)}."
-
-        scheduled, reward = False, 0.
-        if action > 0:
-            ## Get valid jobs
-            nb_hosts = sum( 1 for _ in self.simulator.platform.hosts)
-            posibles = [ j for j in self.simulator.queue if j.res <= nb_hosts ]
-
-            job = posibles[int(action)-1]
-
-            available = self.simulator.platform.get_not_allocated_hosts()
-            if job.res <= len(available):
-                res = [h.id for h in available[:job.res]]
-                self.simulator.allocate(job.id, res)
-                self.running_jobs[job.id] = [h.name for h in available[:job.res]]
-                scheduled = True
-
-        if not scheduled:
-            reward = self._get_reward()
-            self.simulator.proceed_time(self.t_action)
-
+        print(f"\t{self.simulator.current_time} ({int(action)}/{len(posible_jobs)})",
+              f" - {self.simulator.current_time - job.subtime} {reward}")
 
         obs = self._get_state()
         done = not self.simulator.is_running
-        info = {"workload": self.workload}
-        return (obs, reward, done, info)
+        info = { "workload": self.workload_fn }
+        return (obs, reward, done, False, info)
 
+    def _on_job_completed(self, job) -> None:
+        self.completed_jobs.add( int(job.name) )
+
+    def _get_posible_jobs(self) -> Sequence[Job]:
+        """ Returns all jobs that fit in the remaining Hosts and that their requisite jobs have been completed. """
+
+        # `get_not_allocated_hosts()` gives us the hosts which are available for allocating jobs.
+        nb_avail = sum( 1 for _ in self.simulator.platform.get_not_allocated_hosts() )
+
+        resources_met    = lambda x: x.res <= nb_avail
+        # If dependencies have finished, they should be in completed_jobs.
+        dependencies_met = lambda x: all( i in self.completed_jobs for i in x.metadata["dependencies"]) if "dependencies" in x.metadata else True
+
+        valid_jobs = filter(lambda x: resources_met(x) and (dependencies_met(x) or not self.track_dependencies), self.simulator.queue)
+        return list(valid_jobs)
+
+    def _get_host_speeds(self) -> Dict[str, float]:
+        """ Reads the compputing seeds of each host, and stores them in Kflops """
+
+        root = ET.parse(self.platform_fn).getroot()
+
+        prefixes = { "G": 10e9, "M": 10e6, "K": 10e3 }
+        lower_bound = prefixes["K"]
+
+        str_speeds = { h.attrib["id"]: h.get("speed").split(",")[0][:-1] for h in root.iter("host") }
+        int_speeds = { k: float(h[:-1]) * prefixes[h[-1]] for k,h in str_speeds.items() }
+        norm_speeds = { k: v/lower_bound for k, v in int_speeds.items() }
+
+        return norm_speeds
 
     def _get_reward(self) -> float:
+        score = 0.
+        current_time = self.simulator.current_time
+        nb_avail = sum( 1 for _ in self.simulator.platform.get_not_allocated_hosts() )
 
-        # 1. Get running jobs
-        #jobs = filter(lambda x: x.id in self.running_jobs, self.simulator.jobs)
-        jobs = [ j for j in self.simulator.jobs if j.is_running ]
+        # `simulator.jobs` only contains unfinished jobs, so we are only considering jobs allocated on current time.
+        allocated_jobs = filter(lambda x: x.start_time == current_time, self.simulator.jobs)
+        allocated_weights = np.fromiter((np.log(j.profile.cpu / j.walltime) if j.walltime else 0.for j in allocated_jobs), float)
 
-        # 2. Calculating reward
-        job_slowest_res = [ min(map(lambda x: self.host_speeds[x], i))
-                                        for i in self.running_jobs.values() ]
+        score += allocated_weights.mean()
 
-        expected_turnaround = [ i.profile.cpu / j for i,j in zip(jobs, job_slowest_res) ]
-        waiting_time = [ i.waiting_time if i.waiting_time != None else 0 for i in jobs ]
-
-        # frac log
-        #r = [ i + j for i, j in zip(expected_turnaround, waiting_time) ]
-        #return -1*(sum(r)**2) if len(r) != 0 else 0.0
-
-        return (-1 * sum(waiting_time)/len(waiting_time)) if len(waiting_time) != 0. else 0.
+        # If there are jobs that still can enter the knapsack, the reward should be better.
+        valid_jobs   = self._get_posible_jobs()
 
 
-    def _get_state(self) -> Any:
-        nb_hosts = sum( 1 for _ in self.simulator.platform.hosts)
+        # Invalid jobs should generate a discount depening the reason ( resources needed or dependencies ).
+        invalid_jobs = [ i for i in self.simulator.queue if i.name not in map(lambda x: x.name, valid_jobs) ]
 
-        # 1. Only jobs that fit.
-        posibles = [ j for j in self.simulator.queue if j.res <= nb_hosts ]
+        res_limited  = [ i for i in self.simulator.queue if i.res > nb_avail ]
+        dep_limited  = [ i for i in invalid_jobs if i.name not in map(lambda x: x.name, res_limited) ]
 
-        '''
-        # 2. Only jobs whose deendencies are finished.
-        deps = [ x.metadata["dependencies"] if "dependencies" in x.metadata
-                                                    else [] for x in posibles ]
-        deps_status = [ sum(j not in self.completed_jobs for j in i) == 0
-                                                                for i in deps ]
-        valid = [ i for i, j in zip(posibles, deps_status) if j == True ]
-        '''
-        valid = posibles
+        res_discount  = sum([ current_time - i.subtime for i in res_limited ]) / len(res_limited) if len(res_limited) > 0 else 0.
+        dep_discount  = sum([ 1 for _ in dep_limited ]) / len(dep_limited) if len(dep_limited) > 0 else 0.
 
-        ## Queue status
-        jobs = np.zeros((len(valid), 4))
-        if jobs.shape[0] != 0:
-            # Job subtime
-            jobs[:,0] = [ j.subtime for j in valid ]
-            # Job resources
-            jobs[:,1] = [ j.res     for j in valid ]
-            # Job wall
-            jobs[:,2] = [ -1 if j.walltime is None else j.walltime for j in valid ]
-            # Job flops
-            jobs[:,3] = [ j.profile.cpu if hasattr(j.profile, "cpu") else -1
-                                                                for j in valid ]
+        score -= res_discount + dep_discount
 
-        queue = { "size": len(self.simulator.queue), "jobs": jobs }
+        allocated_jobs = [ j for j in self.simulator.jobs if j.start_time == current_time ]
+        return score
 
-        ## Build Platform State
-        hosts = np.zeros((nb_hosts, 3))
+    def _get_state(self):
+        nb_hosts = sum( 1 for _ in self.simulator.platform.hosts )
+        nb_avail = sum( 1 for _ in self.simulator.platform.get_not_allocated_hosts() )
 
-        if nb_hosts != 0:
-            # TODO - Revisar forma en que se estan mandando estos valores
-            #        (ej. Mandar speed relativa a la más lenta o algo asi)
+        valid_jobs = self._get_posible_jobs()
 
-            # Host status
-            hosts[:,0] = [ h.state.value for h in self.simulator.platform.hosts ]
-            # Host speed
-            hosts[:,1] = [ self.host_speeds[h.name]
-                                         for h in self.simulator.platform.hosts ]
-            # Host energy
-            hosts[:,2] = [ h.get_pstate_by_type(batsim_py.resources.PowerStateType.COMPUTATION)[0].watt_full
-                                         for h in self.simulator.platform.hosts ]
+        # Queue status
+        jobs = np.zeros( (len(valid_jobs), 5) )
+        if len(valid_jobs) != 0:
+        ## Subtime
+            jobs[:,0] = [ j.subtime for j in valid_jobs ]
+        ## Resources
+            jobs[:,1] = [ j.res     for j in valid_jobs ]
+        ## Walltime
+            jobs[:,2] = [ j.walltime if j.walltime else -1 for j in valid_jobs ]
+        ## Flops
+            jobs[:,3] = [ j.profile.cpu or 0 for j in valid_jobs ]
+        ## Dependencies
+            queue_deps = sum([ i.metadata["dependencies"] for i in self.simulator.queue if "dependencies" in i.metadata ], [])
+            jobs[:,4] = [ queue_deps.count(int(i.name)) for i in valid_jobs ]
+            # jobs[:,4] = [ len(j.metadata["dependencies"]) if "dependencies" in j.metadata else 0 for j in valid_jobs ]
 
-        sorted_idxs = np.argsort(hosts[:,1])
-        hosts = hosts[sorted_idxs]
+        queue = { "size": len(valid_jobs), "jobs": jobs }
 
-        platform = { "nb_hosts": nb_hosts, "hosts": hosts }
+        # Platform status
+        hosts = np.zeros( (nb_hosts, 2) )
+        ## Status (0 - sleep, ..., 3 - computation)
+        hosts[:,0] = [ not h.is_allocated for h in self.simulator.platform.hosts ]
+        ## Speed (Kflops)
+        hosts[:,1] = [ self.host_speeds[h.name] for h in self.simulator.platform.hosts ]
 
+        ## Energy consumption
+        #hosts[:,2] = [  for h in self.simulator.platform.hosts ]
+        ## Energy left (?)
+
+        ## Sort by status & speed
+        #sorted_indices = np.lexsort((-hosts[:, 1], -hosts[:, 0]))
+        #hosts = hosts[sorted_indices]
+
+        platform = { "nb_hosts": nb_avail, "hosts": hosts }
+
+        # Full state
         state = {
-            "queue": queue,
-            "platform": platform,
-            "current_time": self.simulator.current_time
+             "queue": queue,
+             "platform": platform,
+             "current_time": self.simulator.current_time
         }
 
         return state
 
-
     def _get_spaces(self):
-        # TODO - update dis
-        nb_hosts, agenda_shape, status_shape = 0, (), ()
+        nb_avail = nb_jobs = 0
+
         if self.simulator.is_running:
-            nb_hosts = sum(1 for _ in self.simulator.platform.hosts)
-            status_shape = (nb_hosts,  )
-            agenda_shape = (nb_hosts, 3)
+            nb_avail = len(self.simulator.platform.get_not_allocated_hosts())
+            nb_jobs  = len([ j for j in self.simulator.queue if j.res <= nb_avail ])
 
-        # Queue
-        queue = spaces.Dict({
-            "size": spaces.Discrete(INF),
-            "jobs": spaces.Box(low=-1, high=INF, shape=(self.queue_max_len, 5))
-        })
+        obs_shape = (nb_jobs, 7, 1)
 
-        # Platform
-        platform = spaces.Dict({
-            "nb_hosts": spaces.Discrete(nb_hosts),
-            "agenda": spaces.Box(low=-1, high=INF, shape=agenda_shape),
-            "status": spaces.Box(low= 0, high= 7,  shape=status_shape)
-        })
+        observation_space = spaces.Box(low=0, high=INF, shape=obs_shape, dtype=np.float32)
+        action_space = spaces.Discrete(1)
 
-        obs_space = spaces.Dict({
-            "queue": queue,
-            "platform": platform,
-            "current_time": spaces.Box(low=0, high=INF, shape=())
-        })
-
-        action_space = spaces.Discrete(self.queue_max_len+1)
-        return obs_space, action_space
-
-
+        return observation_space, action_space
 

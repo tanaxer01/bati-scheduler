@@ -115,9 +115,6 @@ class MonitorsInterface:
         self.monitors_fns = monitors_fns
         self.monitors : list[Monitor]= []
 
-        for i in self.monitors_fns:
-            print(i)
-
     def init_episode(self, simulator, is_final_ep=False):
         if not is_final_ep:
             return
@@ -126,8 +123,8 @@ class MonitorsInterface:
             self.monitors.append( fn(simulator) )
 
     def record(self):
-        print(self.monitors)
         if len(self.monitors) == 0:
+            print("No monitors in the interface")
             return
 
         for fn, monitor in zip(self.monitors_fns, self.monitors):

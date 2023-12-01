@@ -1,4 +1,5 @@
 import batsim_py
+from model.metrics import MonitorsInterface
 from schedulers.FCFSScheduler import FCFSScheduler
 from schedulers.EASYScheduler import EASYScheduler
 
@@ -7,12 +8,20 @@ def run_simulation(scheduler, platform_path: str, workload_path: str):
     scheduler = scheduler(simulator)
 
     # 1) Instantiate monitors to collect simulation statistics
-    jobs_mon = batsim_py.monitors.JobMonitor(simulator)
-    sim_mon  = batsim_py.monitors.SimulationMonitor(simulator)
-    schedule_mon  = batsim_py.monitors.SchedulerMonitor(simulator)
+    monitors = MonitorsInterface(
+            name = str(scheduler),
+            save_dir ="/data/expe-out",
+            monitors_fns = [
+                batsim_py.monitors.JobMonitor,
+                batsim_py.monitors.SimulationMonitor,
+                batsim_py.monitors.SchedulerMonitor,
+                batsim_py.monitors.ConsumedEnergyMonitor,
+                batsim_py.monitors.HostStateSwitchMonitor
+            ])
+    monitors.init_episode(simulator, True)
 
     # 2) Start simulation
-    simulator.start(platform=platform_path, workload=workload_path, verbosity="information")
+    simulator.start(platform=platform_path, workload=workload_path, verbosity="quiet")
 
     # 3) Schedule all jobs
     while simulator.is_running:
@@ -23,22 +32,14 @@ def run_simulation(scheduler, platform_path: str, workload_path: str):
     simulator.close()
 
     # 4) Return/Dump statistics
-    return jobs_mon, sim_mon, schedule_mon
-
-jobs_f, sim_f, schedule_f = run_simulation(FCFSScheduler,
-                               "/data/platforms/FatTree/generated.xml",
-                               "/data/workloads/test/w.json")
-
-jobs_f.to_csv(f"/data/expe-out/jobs-FCFS.out")
-sim_f.to_csv("/data/expe-out/sim-FCFS.out")
-schedule_f.to_csv("/data/expe-out/schedule-FCFS.out")
+    monitors.record()
 
 
-jobs_e, sim_e, schedule_e = run_simulation(EASYScheduler,
-                               "/data/platforms/FatTree/generated.xml",
-                               "/data/workloads/test/w.json")
+run_simulation(FCFSScheduler,
+               "/data/platforms/FatTree/fat_tree_4.xml",
+               "/data/workloads/test/w.json")
 
-jobs_e.to_csv(f"/data/expe-out/jobs-EASY.out")
-sim_e.to_csv("/data/expe-out/sim-EASY.out")
-schedule_e.to_csv("/data/expe-out/schedule-EASY.out")
+run_simulation(EASYScheduler,
+               "/data/platforms/FatTree/fat_tree_4.xml",
+               "/data/workloads/test/w.json")
 

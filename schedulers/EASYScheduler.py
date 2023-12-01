@@ -8,17 +8,17 @@ class EASYScheduler(FCFSScheduler):
         super().schedule() # Schedule with FCFS
 
         # Apply the backfilling mechanism
-        if len(self.simulator.queue) >= 2:
+        if len(self.valid_jobs) >= 2:
             self.backfill()
 
     def backfill(self) -> None:
-        assert len(self.simulator.queue) >= 2
+        assert len(self.valid_jobs) >= 2
 
         # The priority job is the first job in the queue.
-        p_job = self.simulator.queue[0]
+        p_job = self.valid_jobs[0]
 
         # The remaining jobs can be scheduled if they do not delay p_job.
-        backfilling_queue = self.simulator.queue[1:]
+        backfilling_queue = self.valid_jobs[1:]
 
         # Get the next expected releases
         next_releases = sorted(self.simulator.agenda, key=lambda a: a.release_time)

@@ -1,57 +1,12 @@
-from typing import Any, Dict, List, Optional, Set, Tuple
-import xml.etree.ElementTree as ET
-import numpy as np
-
-import batsim_py
-from batsim_py.jobs import Job
-
 from gymnasium import error, spaces
+from typing import Any, Tuple
+import numpy as np
 
 from .base_env import SchedulingEnv
 
 INF = float('inf')
 
 class BackfillEnv(SchedulingEnv):
-    def __init__(self,
-                 platform_fn: str,
-                 workload_fn: str,
-                 t_action: int = 1,
-                 t_shutdown: int = 1,
-                 seed: Optional[int] = None,
-                 simulation_time: Optional[float] = None,
-                 verbosity: batsim_py.simulator.BatsimVerbosity = 'quiet',
-                 shutdown_policy = None,
-                 track_dependencies: bool = False) -> None:
-
-        super().__init__(
-                platform_fn,
-                workload_fn,
-                t_action,
-                seed,
-                simulation_time,
-                verbosity)
-
-        self.host_speeds : Dict[str, float] = self._get_host_speeds()
-        self.completed_jobs : Set[int] = {*()}
-
-        self.simulator.subscribe(batsim_py.events.JobEvent.COMPLETED, self._on_job_completed)
-
-    @property
-    def valid_jobs(self) -> List[Job]:
-        """  Filter input and returns all jobs that can be allocated """
-
-        # `get_not_allocated_hosts()` gives us the hosts which are available for allocating jobs.
-        nb_avail = sum( 1 for _ in self.simulator.platform.get_not_allocated_hosts() )
-
-        resources_met    = lambda x: x.res <= nb_avail
-        dependencies_met = lambda x: "real_subtime" in x.metadata or "dependencies" not in x.metadata
-
-        # Jobs real subtime needs to take into account when they became available
-        #valid_jobs  = filter(lambda x: resources_met(x) and dependencies_met(x), self.simulator.queue)
-
-        valid_jobs  = filter(lambda x: dependencies_met(x), self.simulator.queue)
-        sorted_jobs = sorted(valid_jobs, key=lambda x: x.metadata["real_subtime"] if "dependencies" in x.metadata else x.subtime)
-        return sorted_jobs
 
     def reset(self, seed=None, options=None) -> Any:
         self._close_simulator()
@@ -61,33 +16,6 @@ class BackfillEnv(SchedulingEnv):
 
         self.observation_space, self.action_space = self._get_spaces()
         return self._get_state(), {}
-
-    def _get_host_speeds(self) -> Dict[str, float]:
-        """ Reads the compputing seeds of each host, and stores them in Kflops """
-
-        root = ET.parse(self.platform_fn).getroot()
-
-        prefixes = { "G": 10e9, "M": 10e6, "K": 10e3 }
-        lower_bound = prefixes["K"]
-
-        str_speeds = { h.attrib["id"]: h.get("speed").split(",")[0][:-1] for h in root.iter("host") }
-        int_speeds = { k: float(h[:-1]) * prefixes[h[-1]] for k,h in str_speeds.items() }
-        norm_speeds = { k: v/lower_bound for k, v in int_speeds.items() }
-
-        return norm_speeds
-
-    def _on_job_completed(self, job: Job) -> None:
-        """
-        This function keeps track of completed jobs and updates the real time when jobs with
-        dependencies became available.
-        """
-
-        self.completed_jobs.add( int(job.name) )
-
-        child_nodes = filter(lambda j: "dependencies" in j.metadata and int(job.name) in j.metadata["dependencies"], self.simulator.jobs)
-        for j in child_nodes:
-            # This ensures that if the job has more than one dependency, `real_subtime` will take the value of the last one.
-            j.metadata["real_subtime"] = self.simulator.current_time
 
     def step(self, action: int) -> Tuple[Any, float, bool, bool, dict]:
         if not self.simulator.is_running or not self.simulator.platform:
@@ -219,9 +147,6 @@ class BackfillEnv(SchedulingEnv):
         return total
 
     def _get_state(self):
-        nb_hosts = sum( 1 for _ in self.simulator.platform.hosts )
-        nb_avail = sum( 1 for _ in self.simulator.platform.get_not_allocated_hosts() )
-
         backfill_options = self._backfill_options()
         backfill_jobs = list(map(lambda x: self.simulator.jobs[x[0] + 1], backfill_options))
         backfill_allocs = list(map(lambda x: x[1], backfill_options))

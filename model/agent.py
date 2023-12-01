@@ -218,7 +218,7 @@ class Agent():
             logger = MetricLogger(save_dir)
 
         #episodes = 40
-        episodes = 20
+        episodes = 10
         for e in range(episodes):
             state, _ = env.reset()
             state = self._process_obs(state)
@@ -294,26 +294,24 @@ class Agent():
         print(f"[DONE] Score: {history['score']} - Steps: {history['steps']}")
 
     def _process_obs(self, obs):
-        queue = obs["queue"]
-        platform = obs["platform"]
+        queue = obs["jobs"]
 
         # State matrix
-        state = torch.zeros(queue["jobs"].shape[0], 8)
-        for i, (sub, res, wall, flops, deps) in enumerate(queue["jobs"]):
-            last_alloc = platform["hosts"][int(res)-1,1]
-
+        state = torch.zeros(queue.shape[0], 8)
+        for i, (wait, res, wall, flops, deps) in enumerate(queue):
             # Task stuff
             ## Waiting time
-            state[i, 0] = obs["current_time"] - sub
+            state[i, 0] = wait
             ## Resources
-            state[i, 1] = res / platform["nb_hosts"]
+            state[i, 1] = res
             ## Walltime
-            state[i, 2] =  wall
+            state[i, 2] = wall
             ## Flops
-            state[i, 3] =  flops
+            state[i, 3] = flops
             ## Dependencies
             state[i, 4] = deps
 
+            '''
             candidates = np.delete(queue["jobs"], i-1, 0)
             candidates = candidates[candidates[:, 1] <= res]
 
@@ -328,6 +326,8 @@ class Agent():
             ## Mean Walltime
             #state[i, 7] = candidates[:,2].mean() / platform["hosts"][:,1].mean() if candidates.shape[0] != 0 else 0.
             state[i, 7] = candidates[:,2].mean() if candidates.shape[0] != 0 else 0.
+            '''
 
-        return state
+        #return state
+        return torch.from_numpy(queue).type(torch.float32)
 
