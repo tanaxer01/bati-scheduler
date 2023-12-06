@@ -1,3 +1,4 @@
+from logging import shutdown
 from typing import Optional
 import batsim_py
 
@@ -11,7 +12,7 @@ from model.agent    import Agent
 from model.fcfs     import FCFSAgent
 
 # Meanwhile
-STATE_SIZE = 5
+STATE_SIZE = 6
 
 def init_monitors(name, dir="/data/expe-out"):
     return MonitorsInterface(
@@ -27,17 +28,17 @@ def init_monitors(name, dir="/data/expe-out"):
 
 def train_model(env_fn: type, platform_fn: str, workload_fn: str):
     print("[TRAIN]")
-    env = env_fn(platform_fn=platform_fn, workload_fn=workload_fn, t_action = 10)
+    env = env_fn(platform_fn=platform_fn, workload_fn=workload_fn, shutdown_policy = lambda s: TimeoutPolicy(5,s))
     agent = Agent(STATE_SIZE)
 
-    agent.play(env, 40, True)
+    agent.play(env, 10, True)
 
 def test_model(name:str, env_fn: type, platform_fn: str, test_fn: str, train_fn: Optional[str]= None):
     if train_fn != None:
         train_model(env_fn, platform_fn, train_fn)
 
     print("[TEST]")
-    env = env_fn(platform_fn=platform_fn, workload_fn=test_fn, t_action=5)
+    env = env_fn(platform_fn=platform_fn, workload_fn=test_fn, shutdown_policy = lambda s: TimeoutPolicy(5,s))
 
     monitors = init_monitors(name)
     agent = Agent(STATE_SIZE, monitors=monitors)
@@ -54,9 +55,11 @@ train4 = "/data/workloads/training4"
 
 test  = "/data/workloads/test/w.json"
 
-### DQN4
-test_model("DQN", SimpleEnv, plat2, test, train)
+### DQN4fat_tree_heterogeneous
+test_model("DQN3", SimpleEnv, plat2, test, train)
+#test_model("DQN3", SimpleEnv, plat2, test)
 
 ### BACK+DQN4
-test_model("EASY+DQN", BackfillEnv, plat, test, train)
+#test_model("EASY+DQN", BackfillEnv, plat4, test)
+#test_model("EASY+DQN", BackfillEnv, plat2, test, train)
 

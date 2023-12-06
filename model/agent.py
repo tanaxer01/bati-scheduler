@@ -239,11 +239,7 @@ class Agent():
                 # Learn
                 loss, q = self.learn()
 
-                # Logging
-                # for m in self.monitors:
-                #    if type(m) == TrainingMonitor:
-                #        m.log_step(reward.item(), loss, q)
-
+                # Log
                 if save and logger:
                     logger.log_step(reward.item(), loss, q)
 
@@ -303,7 +299,7 @@ class Agent():
 
         # State matrix
         state = torch.zeros(queue.shape[0], 8)
-        for i, (wait, res, wall, flops, deps) in enumerate(queue):
+        for i, (wait, res, wall, flops, deps, watts) in enumerate(queue):
             # Task stuff
             ## Waiting time
             state[i, 0] = wait
@@ -315,6 +311,9 @@ class Agent():
             state[i, 3] = flops
             ## Dependencies
             state[i, 4] = deps
+            ## A
+            ## Watts
+            state[i, 5] = watts
 
             '''
             candidates = np.delete(queue["jobs"], i-1, 0)

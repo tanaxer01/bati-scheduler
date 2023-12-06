@@ -1,10 +1,12 @@
 import batsim_py
 from model.metrics import MonitorsInterface
+from envs.shutdown_policies import TimeoutPolicy
 from schedulers.FCFSScheduler import FCFSScheduler
 from schedulers.EASYScheduler import EASYScheduler
 
 def run_simulation(scheduler, platform_path: str, workload_path: str):
     simulator = batsim_py.SimulatorHandler()
+    policy = TimeoutPolicy(1, simulator)
     scheduler = scheduler(simulator)
 
     # 1) Instantiate monitors to collect simulation statistics

@@ -1,5 +1,4 @@
 from batsim_py import simulator
-from batsim_py.resources import PowerStateType
 from gymnasium import error, spaces
 from typing import Any, Tuple
 import numpy as np
@@ -158,7 +157,7 @@ class BackfillEnv(SchedulingEnv):
         backfill_allocs = list(map(lambda x: x[1], backfill_options))
 
         # Backfill status
-        jobs = np.zeros( (len(backfill_jobs), 6) )
+        jobs = np.zeros( (len(backfill_jobs), 5) )
 
         if len(backfill_jobs) > 0:
             ## Waiting time
@@ -175,11 +174,6 @@ class BackfillEnv(SchedulingEnv):
             ## Speed
             #jobs[:,5] = [ min([self.host_speeds[h] for h in a])  for a in backfill_allocs ]
             ## Energy
-            allocs = [ [ self.simulator.platform.get_host(h) for h in hosts ] for hosts in backfill_allocs ]
-            states = [ [ h.get_pstate_by_type(PowerStateType.COMPUTATION)[0] for h in hosts ] for hosts in allocs ]
-            watts  = [ [ state.watt_full for state in hosts ] for hosts in states ]
-
-            jobs[:,5] = [ sum(w) for w in watts ]
 
         queue = { "size": len(backfill_jobs), "jobs": jobs }
         return queue

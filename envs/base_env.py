@@ -11,6 +11,8 @@ import gymnasium as gym
 from gymnasium import error
 from gymnasium.utils import seeding
 
+from .shutdown_policies import ShutdownPolicy
+
 class SchedulingEnv(gym.Env):
     """Basic Environment that implement all basic parts of the scheduling environment"""
 
@@ -21,7 +23,8 @@ class SchedulingEnv(gym.Env):
             t_action : Optional[int] = None,
             seed : Optional[int] = None,
             simulation_time : Optional[float] = None,
-            verbosity : BatsimVerbosity = "quiet") -> None:
+            verbosity : BatsimVerbosity = "quiet",
+            shutdown_policy = None ) -> None:
         super().__init__()
 
         if not platform_fn:
@@ -47,6 +50,8 @@ class SchedulingEnv(gym.Env):
         self.simulation_time = simulation_time
         self.observation_space, self.action_space = self._get_spaces()
 
+        if shutdown_policy:
+            self.shutdown_policy = shutdown_policy(self.simulator)
         self.host_speeds : Dict[str, float] = self._get_host_speeds()
         self.completed_jobs : Set[int] = {*()}
         self.simulator.subscribe(batsim_py.events.JobEvent.COMPLETED, self._on_job_completed)

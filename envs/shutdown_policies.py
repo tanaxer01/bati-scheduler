@@ -1,48 +1,49 @@
 
 from typing import Dict
 from batsim_py import HostEvent, SimulatorEvent, SimulatorHandler
-from batsim_py.resources import Host
+from batsim_py.resources import Host, PowerStateType
+
+class ShutdownPolicy:
+    pass
+
+
+class ShutdownOnAdvance:
+    pass
+
+
 
 class TimeoutPolicy:
-    def __init__(self, timeout: int, simulator: SimulatorHandler):
-        self.timeout   = timeout
+    def __init__(self, t_timeout: float, simulator: SimulatorHandler) -> None:
         self.simulator = simulator
-        self.idle_servers : Dict[int, float] = {}
+        self.t_timeout = t_timeout
+        self.hosts_idle = {}
+        # Subscribe to some events.
+        self.simulator.subscribe(SimulatorEvent.SIMULATION_BEGINS, self.on_simulation_begins)
+        self.simulator.subscribe(HostEvent.STATE_CHANGED, self.on_host_state_changed)
 
-        super().__init__()
+    def on_simulation_begins(self, s: SimulatorHandler) -> None:
+        for host in s.platform.hosts:
+            if host.is_idle:
+                self.hosts_idle[host.id] = s.current_time
+                self.setup_callback()
 
-        self.simulator.subscribe(HostEvent.STATE_CHANGED, self._on_host_state_changed)
-        self.simulator.subscribe(SimulatorEvent.SIMULATION_BEGINS, self._on_sim_begins)
+    def on_host_state_changed(self, h: Host) -> None:
+        print(self.hosts_idle)
+        print(h.id, h.is_idle, not h.is_allocated)
 
-    def shutdown_idle_hosts(self, *args, **kwargs):
-        hosts_to_turnoff = []
-        for h_id, start_t in list(self.idle_servers.items()):
-            if self.simulator.current_time - start_t >= self.timeout:
-                hosts_to_turnoff.append(h_id)
-                del self.idle_servers[h_id]
+        if (h.is_idle and not h.is_allocated) and not h.id in self.hosts_idle:
+            self.hosts_idle[h.id] = self.simulator.current_time
+            self.setup_callback()
+        elif (not h.is_idle or h.is_allocated) and h.id in self.hosts_idle:
+            del self.hosts_idle[h.id]
 
-        if hosts_to_turnoff:
-            print([ i.state for i in self.simulator.platform.hosts ])
-            print([ i.state.value for i in self.simulator.platform.hosts ])
-            self.simulator.switch_off(hosts_to_turnoff)
+    def setup_callback(self) -> None:
+        t_next_call = self.simulator.current_time + self.t_timeout
+        self.simulator.set_callback(t_next_call, self.callback)
 
-    def add_host_to_list(self, host: Host):
-        if host.id not in self.idle_servers:
-            self.idle_servers[host.id] = self.simulator.current_time
-            t = self.simulator.current_time + self.timeout
-            self.simulator.set_callback(t, self.shutdown_idle_hosts)
-
-    def _on_host_state_changed(self, host: Host):
-        if host.is_idle:
-            if host.id not in self.idle_servers:
-                self.add_host_to_list(host)
-            else:
-                self.idle_servers.pop(host.id, None)
-
-    def _on_sim_begins(self, _):
-        self.idle_servers.clear()
-        for h in self.simulator.platform.hosts:
-            if h.is_idle:
-                self.add_host_to_list(h)
-
-
+    def callback(self, current_time: float) -> None:
+        for host_id, t_idle_start in list(self.hosts_idle.items()):
+            host = self.simulator.platform.get_host(host_id)
+            if  current_time - t_idle_start >= self.t_timeout and (host.is_idle and not host.is_allocated):
+                print("OFF", host.id, host.is_idle, not host.is_allocated)
+                self.simulator.switch_off([host_id])
