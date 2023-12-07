@@ -68,18 +68,6 @@ class SimpleEnv(SchedulingEnv):
             if len(self.valid_jobs) > 0:
                 break
 
-            # Shutdown some devices
-            if self.shutdown_policy != None or 1==1:
-                available = sorted(self.simulator.platform.get_not_allocated_hosts(),
-                                   key=lambda h: self.host_speeds[h.name], reverse=True)
-                free_res = len(available) - sum(i.res for i in self.valid_jobs)
-
-                if free_res  > 0:
-                    die_you = filter(lambda h: h.state == HostState.IDLE,[ h for h in available[-1*(free_res//2):] ])
-                    die_you_ids = [ i.id for i in die_you ]
-                    #self.simulator.switch_off(die_you_ids)
-
-
             self.simulator.proceed_time()
 
         end_t = self.simulator.current_time
@@ -94,11 +82,12 @@ class SimpleEnv(SchedulingEnv):
         allocated_jobs = filter(lambda x: x.start_time == current_time, self.simulator.jobs)
         allocated_weights = np.fromiter((np.log(j.profile.cpu / j.walltime) if j.walltime else 0.for j in allocated_jobs), float)
 
+
         score += allocated_weights.mean()
 
         # If there are jobs that still can enter the knapsack, the reward should be better.
         valid_jobs   = self.valid_jobs
-
+#
 
         # Invalid jobs should generate a discount depening the reason ( resources needed or dependencies ).
         invalid_jobs = [ i for i in self.simulator.queue if i.name not in map(lambda x: x.name, valid_jobs) ]
@@ -122,7 +111,7 @@ class SimpleEnv(SchedulingEnv):
         valid_jobs = self.valid_jobs
 
         # Queue status
-        jobs = np.zeros( (len(valid_jobs), 6) )
+        jobs = np.zeros( (len(valid_jobs), 7) )
 
         if len(valid_jobs) > 0:
             ## Waitting time
@@ -136,14 +125,16 @@ class SimpleEnv(SchedulingEnv):
             ## Dependencies
             queue_deps = sum([ i.metadata["dependencies"] for i in self.simulator.queue if "dependencies" in i.metadata ], [])
             jobs[:,4] = [ queue_deps.count(int(i.name)) for i in valid_jobs ]
-            ## Speed
-            #jobs[:,5] = [ min([self.host_speeds[h] for h in a])  for a in backfill_allocs ]
-            ## Energy
+
+
             allocs = [ available_hosts[:j.res] for j in self.valid_jobs ]
+            ## Speed
+            jobs[:,5] = [ sum( self.host_speeds[h.name] for h in hosts )  for hosts in allocs ]
+            ## Energy
             states = [ [ h.get_pstate_by_type(PowerStateType.COMPUTATION)[0] for h in hosts ] for hosts in allocs ]
             watts  = [ [ state.watt_full for state in hosts ] for hosts in states ]
 
-            jobs[:,5] = [ sum(w) for w in watts ]
+            jobs[:,6] = [ sum(w) for w in watts ]
 
         queue = { "size": len(valid_jobs), "jobs": jobs }
         return queue
@@ -155,12 +146,11 @@ class SimpleEnv(SchedulingEnv):
             nb_avail = len(self.simulator.platform.get_not_allocated_hosts())
             nb_jobs  = len([ j for j in self.simulator.queue if j.res <= nb_avail ])
 
-        obs_shape = (nb_jobs, 6, 1)
+        obs_shape = (nb_jobs, 7, 1)
 
         observation_space = spaces.Box(low=0, high=INF, shape=obs_shape, dtype=np.float32)
         action_space = spaces.Discrete(1)
 
         return observation_space, action_space
-
 
 

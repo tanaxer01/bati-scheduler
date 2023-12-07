@@ -1,18 +1,17 @@
 from logging import shutdown
-from typing import Optional
+from typing import Callable, Optional
 import batsim_py
 
 from envs.simple_env        import SimpleEnv
 from envs.backfill_env      import BackfillEnv
-from envs.shutdown_policies import TimeoutPolicy
+from envs.shutdown_policies import ShutdownPolicy, TimeoutPolicy
 
 from model.metrics  import MonitorsInterface
 
 from model.agent    import Agent
-from model.fcfs     import FCFSAgent
 
 # Meanwhile
-STATE_SIZE = 6
+STATE_SIZE = 7
 
 def init_monitors(name, dir="/data/expe-out"):
     return MonitorsInterface(
@@ -26,40 +25,60 @@ def init_monitors(name, dir="/data/expe-out"):
                 batsim_py.monitors.HostStateSwitchMonitor
             ])
 
-def train_model(env_fn: type, platform_fn: str, workload_fn: str):
+def train_model(env_fn: type,
+                platform_fn: str,
+                workload_fn: str,
+                shutdown_policy: Optional[Callable[[int], TimeoutPolicy]] = None):
+
     print("[TRAIN]")
-    env = env_fn(platform_fn=platform_fn, workload_fn=workload_fn, shutdown_policy = lambda s: TimeoutPolicy(5,s))
-    agent = Agent(STATE_SIZE)
+    env = env_fn(platform_fn=platform_fn, workload_fn=workload_fn, shutdown_policy=shutdown_policy)
+    obs_size = env.observation_space.shape[1]
 
-    agent.play(env, 10, True)
+    agent = Agent(obs_size)
+    agent.play(env, 50, True)
 
-def test_model(name:str, env_fn: type, platform_fn: str, test_fn: str, train_fn: Optional[str]= None):
+def test_model(name:str,
+               env_fn: type,
+               platform_fn: str,
+               test_fn: str,
+               train_fn: Optional[str] = None,
+               shutdown_policy: Optional[Callable[[int], TimeoutPolicy]] = None):
+
     if train_fn != None:
         train_model(env_fn, platform_fn, train_fn)
 
     print("[TEST]")
-    env = env_fn(platform_fn=platform_fn, workload_fn=test_fn, shutdown_policy = lambda s: TimeoutPolicy(5,s))
+    env = env_fn(platform_fn=platform_fn, workload_fn=test_fn, shutdown_policy = shutdown_policy)
+    obs_size = env.observation_space.shape[1]
 
     monitors = init_monitors(name)
-    agent = Agent(STATE_SIZE, monitors=monitors)
+
+
+
+    agent = Agent(obs_size, monitors=monitors)
     agent.load("/data/expe-out/network.chkpt/netwrk")
 
     agent.test(env)
 
-plat  = "/data/platforms/FatTree/fat_tree_heterogeneous.xml"
-plat2  = "/data/platforms/FatTree/generated.xml"
-train = "/data/workloads/training"
+## Files
+plat  = "/data/platforms/generator/fat_tree_heterogeneous.xml"
+plat2  = "/data/platforms/generator/generated.xml"
+train = "/data/workloads/training/16nodes"
 
-plat4  = "/data/platforms/FatTree/fat_tree_4.xml"
-train4 = "/data/workloads/training4"
+plat4  = "/data/platforms/generator/fat_tree_4.xml"
+train4 = "/data/workloads/training/4nodes"
 
 test  = "/data/workloads/test/w.json"
 
+##
+T = 10
+policy = lambda s: TimeoutPolicy(T, s)
+
 ### DQN4fat_tree_heterogeneous
-test_model("DQN3", SimpleEnv, plat2, test, train)
-#test_model("DQN3", SimpleEnv, plat2, test)
+test_model("MEAN", SimpleEnv, plat2, test, train, policy)
+#test_model("SUM", SimpleEnv, plat2, test, None, policy)
 
 ### BACK+DQN4
-#test_model("EASY+DQN", BackfillEnv, plat4, test)
+#test_model("EASY+DQN", BackfillEnv, plat4, test, train, policy)
 #test_model("EASY+DQN", BackfillEnv, plat2, test, train)
 

@@ -1,8 +1,16 @@
 .DS_Store
 .ipynb_checkpoints
 __pycache__
-platforms/heterogeneous
-platforms/*.xml
-workloads
+
+# Workload generator
+workloads/*
+!workloads/test
+!workloads/train
+!workloads/generator
+
+# Platform generator
+platforms/*
+!platforms/generator
+
 env
 expe-out/checkpoints/*

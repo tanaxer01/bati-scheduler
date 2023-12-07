@@ -21,7 +21,8 @@ from .replay_memory import ReplayMemory, Transition
 # EPS_DECAY controls the rate of exponential decay of epsilon, higher means a slower decay
 # TAU is the update rate of the target network
 # LR is the learning rate of the ``AdamW`` optimizer
-BATCH_SIZE = 64
+#BATCH_SIZE = 64
+BATCH_SIZE = 128
 GAMMA = 0.999
 EPS_START = 0.9
 EPS_END = 0.05
@@ -299,7 +300,7 @@ class Agent():
 
         # State matrix
         state = torch.zeros(queue.shape[0], 8)
-        for i, (wait, res, wall, flops, deps, watts) in enumerate(queue):
+        for i, (wait, res, wall, flops, deps, speeds, watts) in enumerate(queue):
             # Task stuff
             ## Waiting time
             state[i, 0] = wait
@@ -311,7 +312,8 @@ class Agent():
             state[i, 3] = flops
             ## Dependencies
             state[i, 4] = deps
-            ## A
+            ## Speeds
+            state[i, 5] = speeds
             ## Watts
             state[i, 5] = watts
 
