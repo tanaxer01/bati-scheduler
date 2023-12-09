@@ -14,9 +14,9 @@ class JobGenerator:
         profile = self.profiles[profile_name]
         resources_required = profile.get('np', 1)
         walltime=profile.get('walltime', (6 * (60 * 60 * 24)))
-        self.graph.add_node(self.job_count, 
-                            profile=profile_name, 
-                            subtime=subtime, 
+        self.graph.add_node(self.job_count,
+                            profile=profile_name,
+                            subtime=subtime,
                             resources_required=resources_required,
                             np=np,
                             walltime=walltime,
@@ -33,7 +33,7 @@ class JobGenerator:
             current_time = self._increment_time(current_time, time_gap, gap_limits)
             n_jobs_now, starting_job = self._create_jobs_at_current_time(current_time, high_load_frequency)
             self._add_dependencies(n_jobs_now, starting_job, dependency_prob, high_load_dependency_prob, current_time)
-            
+
         return self.graph
 
     def _increment_time(self, current_time, time_gap, gap_limits):
@@ -48,7 +48,7 @@ class JobGenerator:
         for p in random_profiles:
             self.add_job(p, subtime=current_time)
         return n_jobs_now, starting_job
-    
+
     def _add_dependencies(self, n_jobs_now, starting_job, dependency_prob, high_load_dependency_prob, current_time):
         current_dependency_prob = dependency_prob if n_jobs_now <= 2 else high_load_dependency_prob
         for job in range(starting_job, self.job_count - 1):
@@ -69,7 +69,7 @@ class JobGenerator:
         job_data = []
         for node in self.graph.nodes():
             job_info = self.graph.nodes[node]
-            
+
             # Fetch the correct walltime for the profile of the job
             walltime = self.profiles[job_info['profile']]['walltime']
 
@@ -88,7 +88,7 @@ class JobGenerator:
 
             job_data.append(job)
         return job_data
-    
+
     def generate_variable_dag(self, probability_function, base_graph, check_interval, duration):
         """
         probability_function: Una función que toma un tiempo (en segundos) y devuelve una probabilidad.
@@ -96,7 +96,7 @@ class JobGenerator:
         check_interval: Cada cuántos segundos se verificará la función de probabilidad.
         duration: Duración total de la simulación en segundos.
         """
-        
+
         current_time = 0  # Iniciar el tiempo actual
 
         while current_time < duration:
@@ -104,10 +104,11 @@ class JobGenerator:
                 # Si se decide generar un trabajo, copiamos el grafo base y lo añadimos al grafo actual
                 offset = len(self.graph.nodes())
                 for node, data in base_graph.nodes(data=True):
+                    self.job_count += 1
                     # Seleccionar un perfil aleatorio
                     profile_name = np.random.choice(list(self.profiles.keys()))
                     profile = self.profiles[profile_name]
-                    
+
                     # Asignar propiedades al nodo
                     node_data = {
                         'profile': profile_name,
@@ -115,7 +116,7 @@ class JobGenerator:
                         'subtime': current_time,
                         'resources_required': profile.get('np', 1)
                     }
-                    
+
                     self.graph.add_node(node + offset, **node_data)
                 for edge in base_graph.edges():
                     self.graph.add_edge(edge[0] + offset, edge[1] + offset)
@@ -139,7 +140,7 @@ class JobGenerator:
 
         for node in self.graph.nodes():
             job_info = self.graph.nodes[node]
-            
+
             # Fetch the correct walltime for the profile of the job
             #walltime = self.profiles[job_info['profile']]['walltime']
 
@@ -157,8 +158,12 @@ class JobGenerator:
                 job['dependencies'] = predecessors
 
             jobs.append(job)
-            
+
         data["jobs"] = jobs
+
+        print("->", self.job_count)
+        self.job_count = len(jobs)
+        print("<-", self.job_count)
 
         with open(file_name + '.json', 'w') as file:
             json.dump(data, file, indent=4)
@@ -184,7 +189,7 @@ class JobGenerator:
         # Convertir la lista de trabajos en un DataFrame
         df = pd.DataFrame(job_data)
         return df
-    
+
     def visualize_with_dot(self):
         A = nx.nx_agraph.to_agraph(self.graph)
         A.layout(prog='dot')
@@ -194,7 +199,7 @@ class JobGenerator:
     def visualize_with_subtime_annotations_dot(self):
         # Crear una copia del grafo para no modificar el original
         graph_copy = self.graph.copy()
-        
+
         # Modificar las etiquetas de los nodos para incluir el subtime
         for node, data in graph_copy.nodes(data=True):
             subtime = data['subtime']

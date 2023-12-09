@@ -70,13 +70,22 @@ train4 = "/data/workloads/training/4nodes"
 
 test  = "/data/workloads/test/w.json"
 
+A  = "/data/workloads/generator/"
+B  = "/data/workloads/generator/no_hills_workload.json"
+
 ##
 T = 10
 policy = lambda s: TimeoutPolicy(T, s)
 
 ### DQN4fat_tree_heterogeneous
-test_model("MEAN", SimpleEnv, plat2, test, train, policy)
-#test_model("SUM", SimpleEnv, plat2, test, None, policy)
+#test_model("10Peaks", SimpleEnv, plat2, test, train, policy)
+
+test_model("DQN+AV",   SimpleEnv, plat2, A + "caso_variado_A.json", None, policy)
+test_model("DQN+BV",   SimpleEnv, plat2, A + "caso_variado_B.json", None, policy)
+test_model("DQN+CV",   SimpleEnv, plat2, A + "caso_variado_C.json", None, policy)
+#test_model("plain+A+DQN", SimpleEnv, plat2, A + "caso_plano_A.json", None, policy)
+#test_model("plain+B+DQN", SimpleEnv, plat2, A + "caso_plano_B.json", None, policy)
+#test_model("plain+C+DQN", SimpleEnv, plat2, A + "caso_plano_C.json", None, policy)
 
 ### BACK+DQN4
 #test_model("EASY+DQN", BackfillEnv, plat4, test, train, policy)
